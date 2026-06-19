@@ -6,11 +6,11 @@ on:
       tag:
         description: Release tag to publish.
         required: true
-        default: v1.0.0
+        default: v0.1.0
       build_name:
         description: Android versionName.
         required: true
-        default: 1.0.0
+        default: 0.1.0
       build_number:
         description: Android versionCode.
         required: true
@@ -55,8 +55,8 @@ jobs:
             build_number="${GITHUB_RUN_NUMBER}"
             publish_release="true"
           else
-            tag="v1.0.0"
-            build_name="1.0.0"
+            tag="v0.1.0"
+            build_name="0.1.0"
             build_number="1"
             publish_release="true"
           fi

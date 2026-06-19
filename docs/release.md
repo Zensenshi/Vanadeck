@@ -17,8 +17,8 @@ To publish the first GitHub release build:
 1. Open the repository on GitHub.
 2. Go to Actions -> Android release build -> Run workflow.
 3. Keep the defaults for the first build:
-   - `tag`: `v1.0.0`
-   - `build_name`: `1.0.0`
+   - `tag`: `v0.1.0`
+   - `build_name`: `0.1.0`
    - `build_number`: `1`
    - `publish_release`: enabled
 4. Download the APK from the workflow artifact or from the generated GitHub Release.
