@@ -21,6 +21,10 @@ on:
         required: true
         default: true
   push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/android-release.yml"
     tags:
       - "v*"
 
@@ -45,10 +49,15 @@ jobs:
             build_name="${{ inputs.build_name }}"
             build_number="${{ inputs.build_number }}"
             publish_release="${{ inputs.publish_release }}"
-          else
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             tag="${GITHUB_REF_NAME}"
             build_name="${tag#v}"
             build_number="${GITHUB_RUN_NUMBER}"
+            publish_release="true"
+          else
+            tag="v1.0.0"
+            build_name="1.0.0"
+            build_number="1"
             publish_release="true"
           fi
 
