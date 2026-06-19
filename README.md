@@ -15,7 +15,7 @@ This project includes the original VanaDeck addon source, but does not include F
 
 ## Requirements
 
-- FINAL FANTASY XI launched through Ashita v4.
+- Ashita v4 setup in your Winlator container.
 - The included VanaDeck Ashita addon.
 - The VanaDeck Android app.
 
