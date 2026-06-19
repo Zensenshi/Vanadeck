@@ -58,6 +58,7 @@ app.*.map.json
 /ashita_addon/
 /tester_drop_*/
 *.apk
+*.zip
 *.DAT
 *.dat
 *.dll
