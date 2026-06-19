@@ -1,0 +1,114 @@
+name: Android release build
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish.
+        required: true
+        default: v1.0.0
+      build_name:
+        description: Android versionName.
+        required: true
+        default: 1.0.0
+      build_number:
+        description: Android versionCode.
+        required: true
+        default: "1"
+      publish_release:
+        description: Attach the APK to a GitHub Release.
+        type: boolean
+        required: true
+        default: true
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+            build_name="${{ inputs.build_name }}"
+            build_number="${{ inputs.build_number }}"
+            publish_release="${{ inputs.publish_release }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+            build_name="${tag#v}"
+            build_number="${GITHUB_RUN_NUMBER}"
+            publish_release="true"
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "build_name=$build_name" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "publish_release=$publish_release" >> "$GITHUB_OUTPUT"
+          echo "apk_name=vanadeck-$tag.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.1
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build APK
+        run: >
+          flutter build apk --release
+          --build-name "${{ steps.meta.outputs.build_name }}"
+          --build-number "${{ steps.meta.outputs.build_number }}"
+
+      - name: Stage APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/${{ steps.meta.outputs.apk_name }}"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.apk_name }}
+          path: dist/${{ steps.meta.outputs.apk_name }}
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: steps.meta.outputs.publish_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: VanaDeck ${{ steps.meta.outputs.tag }}
+          body: |
+            First Android release build for VanaDeck.
+
+            This APK is suitable for direct install/testing. Configure private release signing before publishing to an app store.
+          files: dist/${{ steps.meta.outputs.apk_name }}
+          make_latest: true

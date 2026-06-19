@@ -59,6 +59,10 @@ flutter test
 flutter build apk
 ```
 
+Release APKs can also be built from GitHub Actions with the manual
+`Android release build` workflow. See [docs/release.md](docs/release.md) for
+the release checklist and first-build steps.
+
 ## Responsible Use
 
 This project is intended as a companion display and convenience interface for user-driven play. It should not be used for unattended gameplay, automation, or behavior that violates FINAL FANTASY XI rules or community standards. Review Square Enix's current user agreement and prohibited activities before using or modifying addon-driven game input features.
