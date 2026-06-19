@@ -1,6 +1,6 @@
 # VanaDeck
 
-VanaDeck is an unofficial Android companion app for FINAL FANTASY XI (FFXI). It pairs with the included Ashita v4 addon to show live party status, chat, macros, maps, and app customization tools in a companion interface.
+VanaDeck is an unofficial Android companion app for FFXI running in Winlator and pairs with the included Ashita v4 addon to show live party status, chat, macros, maps, and app customization tools in a companion interface.
 
 This project includes the original VanaDeck addon source, but does not include FFXI game files, Ashita source or binaries, map packs, DAT files, icon packs, or other third-party game resources. Users should provide their own local resources through the app settings where supported.
 
