@@ -37,7 +37,7 @@ Launch Ashita v4, then load the addon in game:
 
 To load VanaDeck automatically, add the same command to your Ashita startup script or profile.
 
-The current bridge uses `127.0.0.1:8080` and expects newline-delimited JSON status updates from the addon. That means the app and addon must be running in the same local environment unless you change the bridge configuration in source.
+The current bridge uses `127.0.0.1:8080`: status updates are JSON datagrams over UDP, while app-to-game macro and chat commands use a TCP connection on the same port. That means the app and addon must be running in the same local environment unless you change the bridge configuration in source.
 
 ## Optional Resources
 

@@ -74,8 +74,30 @@ class GameStatusService {
 
   Future<void> _listenForStatus() async {
     ServerSocket? server;
+    RawDatagramSocket? statusSocket;
+    StreamSubscription<RawSocketEvent>? statusSubscription;
 
     try {
+      final udpSocket = await RawDatagramSocket.bind(
+        host,
+        port,
+        reuseAddress: true,
+      );
+      statusSocket = udpSocket;
+      statusSubscription = udpSocket.listen((event) {
+        if (event != RawSocketEvent.read) {
+          return;
+        }
+
+        for (
+          var datagram = udpSocket.receive();
+          datagram != null;
+          datagram = udpSocket.receive()
+        ) {
+          _handleStatusPayload(datagram.data);
+        }
+      });
+
       server = await ServerSocket.bind(host, port, shared: true);
       await for (final socket in server) {
         _readStatusSocket(socket);
@@ -84,6 +106,8 @@ class GameStatusService {
       _statusController.addError(error, stackTrace);
       _listenerFuture = null;
     } finally {
+      await statusSubscription?.cancel();
+      statusSocket?.close();
       await server?.close();
     }
   }
@@ -100,17 +124,7 @@ class GameStatusService {
               .cast<List<int>>()
               .transform(const Utf8Decoder(allowMalformed: true))
               .transform(const LineSplitter())) {
-        if (line.trim().isEmpty) {
-          continue;
-        }
-        try {
-          final json = jsonDecode(line) as Map<String, dynamic>;
-          final status = _fromJson(json);
-          _latestStatus = status;
-          _statusController.add(status);
-        } catch (_) {
-          continue;
-        }
+        _handleStatusLine(line);
       }
     } finally {
       _commandSockets.remove(socket);
@@ -118,10 +132,44 @@ class GameStatusService {
     }
   }
 
-  PlayerStatus _fromJson(Map<String, dynamic> json) {
+  void _handleStatusPayload(List<int> payload) {
+    final text = utf8.decode(payload, allowMalformed: true).trim();
+    if (text.isEmpty) {
+      return;
+    }
+
+    for (final line in const LineSplitter().convert(text)) {
+      _handleStatusLine(line);
+    }
+  }
+
+  void _handleStatusLine(String line) {
+    if (line.trim().isEmpty) {
+      return;
+    }
+    try {
+      final decoded = jsonDecode(line);
+      if (decoded is! Map) {
+        return;
+      }
+      final status = _fromJson(decoded.cast<String, dynamic>());
+      if (status == null) {
+        return;
+      }
+      _latestStatus = status;
+      _statusController.add(status);
+    } catch (_) {
+      return;
+    }
+  }
+
+  PlayerStatus? _fromJson(Map<String, dynamic> json) {
     final playerJson = _nestedMap(json['player']) ?? json;
     final partyJson =
         _listValue(json['partyMembers']) ?? _listValue(json['party']);
+    if (!_hasCrediblePlayerPayload(json, playerJson, partyJson)) {
+      return null;
+    }
 
     final currentHp =
         _intValue(playerJson['currentHp']) ??
@@ -215,6 +263,7 @@ class GameStatusService {
       isSubTargetActive: isSubTargetActive,
       chatMessages: _chatMessages(json),
       mapEntities: _mapEntities(json),
+      castState: _castState(json, playerJson),
       partyMembers: partyJson == null
           ? const []
           : partyJson
@@ -225,7 +274,52 @@ class GameStatusService {
     );
   }
 
+  bool _hasCrediblePlayerPayload(
+    Map<String, dynamic> rootJson,
+    Map<String, dynamic> playerJson,
+    List<dynamic>? partyJson,
+  ) {
+    final playerEntityReady =
+        _boolValue(rootJson['playerEntityReady']) ??
+        _boolValue(playerJson['playerEntityReady']) ??
+        _boolValue(playerJson['entityReady']);
+    if (playerEntityReady == false) {
+      return false;
+    }
+
+    final name = (playerJson['name'] as String? ?? '').trim();
+    if (name.isEmpty) {
+      return false;
+    }
+
+    if (partyJson != null) {
+      if (partyJson.isEmpty) {
+        return false;
+      }
+      final firstMember = _nestedMap(partyJson.first);
+      if (firstMember == null) {
+        return false;
+      }
+      final firstName = (firstMember['name'] as String? ?? '').trim();
+      if (firstName.isEmpty) {
+        return false;
+      }
+    }
+
+    return _intValue(playerJson['currentHp']) != null ||
+        _intValue(playerJson['hp']) != null ||
+        _intValue(_nestedValue(playerJson['hp'], 'current')) != null ||
+        _intValue(playerJson['currentMp']) != null ||
+        _intValue(playerJson['mp']) != null ||
+        _intValue(playerJson['tp']) != null ||
+        _intValue(playerJson['level']) != null;
+  }
+
   List<MapEntityLocation> _mapEntities(Map<String, dynamic> rootJson) {
+    if (!rootJson.containsKey('npcs') && !rootJson.containsKey('mobs')) {
+      return _latestStatus?.mapEntities ?? const [];
+    }
+
     final entities = <MapEntityLocation>[];
     final npcJson = rootJson['npcs'];
     final mobJson = rootJson['mobs'];
@@ -258,6 +352,51 @@ class GameStatusService {
     }
 
     return entities;
+  }
+
+  PlayerCastState? _castState(
+    Map<String, dynamic> rootJson,
+    Map<String, dynamic> playerJson,
+  ) {
+    final castJson =
+        _nestedMap(rootJson['cast']) ??
+        _nestedMap(rootJson['castBar']) ??
+        _nestedMap(rootJson['cast_bar']) ??
+        _nestedMap(rootJson['casting']) ??
+        _nestedMap(playerJson['cast']) ??
+        _nestedMap(playerJson['castBar']) ??
+        _nestedMap(playerJson['cast_bar']) ??
+        _nestedMap(playerJson['casting']);
+    if (castJson == null) {
+      return null;
+    }
+
+    final progress = _normalizedProgress(
+      castJson['progress'] ??
+          castJson['percent'] ??
+          castJson['castPercent'] ??
+          castJson['cast_percent'],
+    );
+    final count =
+        _doubleValue(castJson['count']) ?? _doubleValue(castJson['remaining']);
+    final max =
+        _doubleValue(castJson['max']) ??
+        _doubleValue(castJson['duration']) ??
+        _doubleValue(castJson['total']);
+    final isCasting =
+        _boolValue(castJson['isCasting']) ??
+        _boolValue(castJson['is_casting']) ??
+        _boolValue(castJson['active']) ??
+        ((count != null && count > 0) ||
+            (max != null && max > 0 && progress != null && progress > 0));
+
+    return PlayerCastState(
+      isCasting: isCasting,
+      progress: progress,
+      count: count,
+      max: max,
+      castType: _intValue(castJson['castType']) ?? _intValue(castJson['type']),
+    );
   }
 
   ActiveTarget? _activeTarget(
@@ -343,13 +482,21 @@ class GameStatusService {
   }
 
   List<ChatMessage> _chatMessages(Map<String, dynamic> rootJson) {
+    final hasChatMessages =
+        rootJson.containsKey('chatMessages') ||
+        rootJson.containsKey('chat') ||
+        rootJson.containsKey('messages');
+    if (!hasChatMessages) {
+      return _latestStatus?.chatMessages ?? const [];
+    }
+
     final chatJson =
         rootJson['chatMessages'] ?? rootJson['chat'] ?? rootJson['messages'];
     if (chatJson is! List) {
-      return const [];
+      return _latestStatus?.chatMessages ?? const [];
     }
 
-    return chatJson
+    final messages = chatJson
         .map((messageJson) {
           if (messageJson is String) {
             return ChatMessage(
@@ -399,6 +546,62 @@ class GameStatusService {
         })
         .nonNulls
         .toList();
+    final incremental =
+        _boolValue(rootJson['chatIncremental']) ??
+        _boolValue(rootJson['chat_incremental']) ??
+        false;
+    final snapshot =
+        _boolValue(rootJson['chatSnapshot']) ??
+        _boolValue(rootJson['chat_snapshot']) ??
+        _boolValue(rootJson['chatReset']) ??
+        _boolValue(rootJson['chat_reset']) ??
+        false;
+    if (!incremental || snapshot) {
+      return messages;
+    }
+
+    return _mergeChatMessages(
+      _latestStatus?.chatMessages ?? const [],
+      messages,
+    );
+  }
+
+  List<ChatMessage> _mergeChatMessages(
+    List<ChatMessage> existing,
+    List<ChatMessage> updates,
+  ) {
+    if (existing.isEmpty) {
+      return _trimChatMessages(updates);
+    }
+    if (updates.isEmpty) {
+      return existing;
+    }
+
+    final merged = List<ChatMessage>.of(existing);
+    for (final update in updates) {
+      final id = update.id;
+      if (id != null) {
+        merged.removeWhere((message) => message.id == id);
+      }
+      merged.add(update);
+    }
+    merged.sort((a, b) {
+      final aId = a.id;
+      final bId = b.id;
+      if (aId != null && bId != null) {
+        return aId.compareTo(bId);
+      }
+      return a.receivedAt.compareTo(b.receivedAt);
+    });
+    return _trimChatMessages(merged);
+  }
+
+  List<ChatMessage> _trimChatMessages(List<ChatMessage> messages) {
+    const maxMessages = 80;
+    if (messages.length <= maxMessages) {
+      return messages;
+    }
+    return messages.sublist(messages.length - maxMessages);
   }
 
   ChatMessageDirection _chatMessageDirection(dynamic value) {
@@ -557,7 +760,7 @@ class GameStatusService {
         macroJson?['macro_names'];
 
     if (namesJson is! List) {
-      return const [];
+      return _latestStatus?.macroNames ?? const [];
     }
 
     return namesJson.map((name) => name?.toString().trim() ?? '').toList();
@@ -582,7 +785,7 @@ class GameStatusService {
         macroJson?['targeted'];
 
     if (targetJson is! List) {
-      return const [];
+      return _latestStatus?.macroNeedsTarget ?? const [];
     }
 
     return targetJson.map((value) => _boolValue(value) ?? false).toList();
@@ -641,6 +844,17 @@ class GameStatusService {
       return double.tryParse(value);
     }
     return null;
+  }
+
+  double? _normalizedProgress(dynamic value) {
+    final progress = _doubleValue(value);
+    if (progress == null) {
+      return null;
+    }
+    if (progress > 1) {
+      return (progress / 100).clamp(0.0, 1.0).toDouble();
+    }
+    return progress.clamp(0.0, 1.0).toDouble();
   }
 
   dynamic _nestedValue(dynamic value, String key) {

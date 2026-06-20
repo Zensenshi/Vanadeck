@@ -25,12 +25,16 @@ class MacroScreen extends StatefulWidget {
 class _MacroScreenState extends State<MacroScreen> {
   static const _commandPrefix = '__vanadeck_macro_input__:';
   static const _slots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0];
-  static const _castProgressDuration = Duration(milliseconds: 2200);
+  static const _fallbackCastProgressDuration = Duration(milliseconds: 2200);
+  static const _castProgressClearInterval = Duration(milliseconds: 100);
+  static const _maxCastProgressDuration = Duration(seconds: 30);
 
   _MacroModifier _modifier = _MacroModifier.ctrl;
   int _pageSlideDirection = 1;
   String? _castingMacroKey;
+  DateTime? _castStartedAt;
   Timer? _castTimer;
+  bool _gameCastActive = false;
 
   @override
   void dispose() {
@@ -52,6 +56,8 @@ class _MacroScreenState extends State<MacroScreen> {
         final castFeedbackColor =
             widget.settings?.macroCastFeedbackColor ??
             AppSettingsController.defaultCastFeedbackColor;
+        final gameCastProgress = _gameCastProgress(status);
+        _gameCastActive = status?.castState?.isCasting ?? false;
         final colorScheme = Theme.of(context).colorScheme;
 
         return Scaffold(
@@ -187,7 +193,8 @@ class _MacroScreenState extends State<MacroScreen> {
                                   casting:
                                       _castingMacroKey ==
                                       _macroKey(_modifier, slot),
-                                  castDuration: _castProgressDuration,
+                                  castProgress: gameCastProgress,
+                                  castDuration: _fallbackCastProgressDuration,
                                   castFeedbackStyle: castFeedbackStyle,
                                   castFeedbackColor: castFeedbackColor,
                                   onTap: () => _activateMacroSlot(
@@ -302,21 +309,47 @@ class _MacroScreenState extends State<MacroScreen> {
 
   void _startCastProgress(_MacroModifier modifier, int slot) {
     _castTimer?.cancel();
+    _castStartedAt = DateTime.now();
     setState(() {
       _castingMacroKey = _macroKey(modifier, slot);
     });
-    _castTimer = Timer(_castProgressDuration, () {
+    _castTimer = Timer.periodic(_castProgressClearInterval, (timer) {
       if (!mounted) {
+        timer.cancel();
         return;
       }
-      setState(() {
-        _castingMacroKey = null;
-      });
+      final startedAt = _castStartedAt;
+      final elapsed = startedAt == null
+          ? _fallbackCastProgressDuration
+          : DateTime.now().difference(startedAt);
+      final fallbackExpired = elapsed >= _fallbackCastProgressDuration;
+      final hardExpired = elapsed >= _maxCastProgressDuration;
+      if ((!fallbackExpired || _gameCastActive) && !hardExpired) {
+        return;
+      }
+
+      timer.cancel();
+      _castTimer = null;
+      _castStartedAt = null;
+      if (_castingMacroKey != null) {
+        setState(() {
+          _castingMacroKey = null;
+        });
+      }
     });
   }
 
   String _macroKey(_MacroModifier modifier, int slot) {
     return '${modifier.commandValue}:$slot';
+  }
+
+  double? _gameCastProgress(PlayerStatus? status) {
+    final castState = status?.castState;
+    if (castState == null || !castState.isCasting) {
+      return null;
+    }
+
+    return castState.progress?.clamp(0.0, 1.0).toDouble();
   }
 
   String _titleForStatus(PlayerStatus? status) {
@@ -806,6 +839,7 @@ class _MacroInputTile extends StatelessWidget {
     required this.name,
     required this.needsTarget,
     required this.casting,
+    required this.castProgress,
     required this.castDuration,
     required this.castFeedbackStyle,
     required this.castFeedbackColor,
@@ -818,6 +852,7 @@ class _MacroInputTile extends StatelessWidget {
   final String name;
   final bool needsTarget;
   final bool casting;
+  final double? castProgress;
   final Duration castDuration;
   final MacroCastFeedbackStyle castFeedbackStyle;
   final Color castFeedbackColor;
@@ -904,6 +939,7 @@ class _MacroInputTile extends StatelessWidget {
                 _CastFeedbackOverlay(
                   style: castFeedbackStyle,
                   color: castFeedbackColor,
+                  progress: castProgress,
                   duration: castDuration,
                 ),
             ],
@@ -918,52 +954,81 @@ class _CastFeedbackOverlay extends StatelessWidget {
   const _CastFeedbackOverlay({
     required this.style,
     required this.color,
+    required this.progress,
     required this.duration,
   });
 
   final MacroCastFeedbackStyle style;
   final Color color;
+  final double? progress;
   final Duration duration;
 
   @override
   Widget build(BuildContext context) {
+    final progress = this.progress;
     return Positioned.fill(
       child: IgnorePointer(
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0, end: 1),
-          duration: duration,
-          curve: Curves.linear,
-          builder: (context, value, child) {
-            switch (style) {
-              case MacroCastFeedbackStyle.fillBar:
-                return Align(
-                  alignment: Alignment.bottomLeft,
-                  child: ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                      bottom: Radius.circular(8),
-                    ),
-                    child: SizedBox(
-                      height: 5,
-                      width: double.infinity,
-                      child: FractionallySizedBox(
-                        alignment: Alignment.centerLeft,
-                        widthFactor: value,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(color: color),
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              case MacroCastFeedbackStyle.edgeGlow:
-                return CustomPaint(
-                  painter: _CastEdgeGlowPainter(progress: value, color: color),
-                );
-            }
-          },
-        ),
+        child: progress == null
+            ? TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: 1),
+                duration: duration,
+                curve: Curves.linear,
+                builder: (context, value, child) {
+                  return _CastFeedbackVisual(
+                    style: style,
+                    color: color,
+                    progress: value,
+                  );
+                },
+              )
+            : _CastFeedbackVisual(
+                style: style,
+                color: color,
+                progress: progress,
+              ),
       ),
     );
+  }
+}
+
+class _CastFeedbackVisual extends StatelessWidget {
+  const _CastFeedbackVisual({
+    required this.style,
+    required this.color,
+    required this.progress,
+  });
+
+  final MacroCastFeedbackStyle style;
+  final Color color;
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = progress.clamp(0.0, 1.0).toDouble();
+    switch (style) {
+      case MacroCastFeedbackStyle.fillBar:
+        return Align(
+          alignment: Alignment.bottomLeft,
+          child: ClipRRect(
+            borderRadius: const BorderRadius.vertical(
+              bottom: Radius.circular(8),
+            ),
+            child: SizedBox(
+              height: 5,
+              width: double.infinity,
+              child: FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: value,
+                child: DecoratedBox(decoration: BoxDecoration(color: color)),
+              ),
+            ),
+          ),
+        );
+      case MacroCastFeedbackStyle.edgeGlow:
+        return CustomPaint(
+          painter: _CastEdgeGlowPainter(progress: value, color: color),
+        );
+    }
   }
 }
 
