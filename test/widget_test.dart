@@ -83,6 +83,120 @@ void main() {
     expect(find.textContaining('/servmes', findRichText: true), findsNothing);
   });
 
+  testWidgets('chat tab composer backspace button edits text', (tester) async {
+    var sentMessage = '';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatScreen(
+          statusStream: const Stream.empty(),
+          settings: AppSettingsController(),
+          sendChatMessage: (message) async {
+            sentMessage = message;
+          },
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'Hellp');
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Backspace'));
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+
+    expect(sentMessage, 'Hell');
+  });
+
+  testWidgets('chat tab maps keyboard send action to composer send', (
+    tester,
+  ) async {
+    var sentMessage = '';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatScreen(
+          statusStream: const Stream.empty(),
+          settings: AppSettingsController(),
+          sendChatMessage: (message) async {
+            sentMessage = message;
+          },
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'Keyboard send');
+    await tester.pump();
+
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pump();
+
+    expect(sentMessage, 'Keyboard send');
+  });
+
+  testWidgets('chat tab long press chat mode menu inserts party prefix', (
+    tester,
+  ) async {
+    final settings = AppSettingsController(
+      service: const _NoopSettingsService(),
+    );
+    const partyColor = Color(0xFF4DA3FF);
+    await settings.setChatColor(ChatColorRole.party, partyColor);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatScreen(
+          statusStream: const Stream.empty(),
+          settings: settings,
+          sendChatMessage: (_) async {},
+        ),
+      ),
+    );
+
+    final fieldFinder = find.byType(TextField);
+    final gesture = await tester.startGesture(tester.getCenter(fieldFinder));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Party'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('/p')).style?.color, partyColor);
+
+    await gesture.moveTo(tester.getCenter(find.text('Party')));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    final field = tester.widget<TextField>(fieldFinder);
+    expect(field.controller?.text, '/p ');
+  });
+
+  testWidgets('chat tab long press say clears existing chat prefix', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatScreen(
+          statusStream: const Stream.empty(),
+          settings: AppSettingsController(),
+          sendChatMessage: (_) async {},
+        ),
+      ),
+    );
+
+    final fieldFinder = find.byType(TextField);
+    await tester.enterText(fieldFinder, '/sh Hello');
+    await tester.pump();
+
+    final gesture = await tester.startGesture(tester.getCenter(fieldFinder));
+    await tester.pump(const Duration(milliseconds: 400));
+    await gesture.moveTo(tester.getCenter(find.text('Say').last));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    final field = tester.widget<TextField>(fieldFinder);
+    expect(field.controller?.text, 'Hello');
+  });
+
   testWidgets('chat tab throttles rapid sends', (tester) async {
     final sentMessages = <String>[];
 

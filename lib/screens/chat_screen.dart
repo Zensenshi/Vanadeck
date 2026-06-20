@@ -142,6 +142,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     sendEnabled: !_isSending && !_isCoolingDown,
                     cooldownRemaining: _cooldownRemaining,
                     onSend: _sendMessage,
+                    settings: widget.settings,
                     font: font,
                     fontSize: widget.settings.chatFontSize,
                     colors: colors,
@@ -313,13 +314,14 @@ class _ChatFontSpec {
   ];
 }
 
-class _ChatComposer extends StatelessWidget {
+class _ChatComposer extends StatefulWidget {
   const _ChatComposer({
     required this.controller,
     required this.focusNode,
     required this.sendEnabled,
     required this.cooldownRemaining,
     required this.onSend,
+    required this.settings,
     required this.font,
     required this.fontSize,
     required this.colors,
@@ -330,18 +332,90 @@ class _ChatComposer extends StatelessWidget {
   final bool sendEnabled;
   final Duration cooldownRemaining;
   final VoidCallback onSend;
+  final AppSettingsController settings;
   final _ChatFontSpec font;
   final double fontSize;
   final _ChatSurfaceColors colors;
 
   @override
+  State<_ChatComposer> createState() => _ChatComposerState();
+}
+
+class _ChatComposerState extends State<_ChatComposer> {
+  static const _chatModeHoldDelay = Duration(milliseconds: 360);
+  static const _chatModeMenuItemHeight = 44.0;
+  static const _chatModeMenuPadding = 6.0;
+  static const _chatModeMenuGap = 10.0;
+  static const _chatModeMenuWidth = 220.0;
+  static const _chatModeOptions = [
+    _ChatModeOption(label: 'Yell', prefix: '/y ', role: ChatColorRole.yell),
+    _ChatModeOption(label: 'Shout', prefix: '/sh ', role: ChatColorRole.shout),
+    _ChatModeOption(label: 'Reply', prefix: '/r ', role: ChatColorRole.tell),
+    _ChatModeOption(
+      label: 'Linkshell',
+      prefix: '/l ',
+      role: ChatColorRole.linkshell,
+    ),
+    _ChatModeOption(label: 'Party', prefix: '/p ', role: ChatColorRole.party),
+    _ChatModeOption(label: 'Say', prefix: '', role: ChatColorRole.say),
+  ];
+
+  Timer? _chatModeTimer;
+  OverlayEntry? _chatModeOverlay;
+  Rect? _chatModeMenuRect;
+  Offset? _chatModePointer;
+  int? _hoveredChatModeIndex;
+
+  @override
+  void dispose() {
+    _chatModeTimer?.cancel();
+    _removeChatModeMenu();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final cooldownSeconds = (cooldownRemaining.inMilliseconds / 1000).ceil();
+    final cooldownSeconds = (widget.cooldownRemaining.inMilliseconds / 1000)
+        .ceil();
+
+    void backspace() {
+      final text = widget.controller.text;
+      if (text.isEmpty) {
+        widget.focusNode.requestFocus();
+        return;
+      }
+
+      final selection = widget.controller.selection;
+      final start = selection.start;
+      final end = selection.end;
+      if (selection.isValid && !selection.isCollapsed) {
+        widget.controller.value = TextEditingValue(
+          text: text.replaceRange(start, end, ''),
+          selection: TextSelection.collapsed(offset: start),
+        );
+        widget.focusNode.requestFocus();
+        return;
+      }
+
+      final cursor = selection.isValid ? selection.baseOffset : text.length;
+      final safeCursor = cursor.clamp(0, text.length).toInt();
+      if (safeCursor <= 0) {
+        widget.focusNode.requestFocus();
+        return;
+      }
+
+      widget.controller.value = TextEditingValue(
+        text: text.replaceRange(safeCursor - 1, safeCursor, ''),
+        selection: TextSelection.collapsed(offset: safeCursor - 1),
+      );
+      widget.focusNode.requestFocus();
+    }
+
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
       decoration: BoxDecoration(
-        color: colors.composer,
-        border: Border(top: BorderSide(color: colors.border)),
+        color: widget.colors.composer,
+        border: Border(top: BorderSide(color: widget.colors.border)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -349,60 +423,75 @@ class _ChatComposer extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: controller,
-                  focusNode: focusNode,
-                  minLines: 1,
-                  maxLines: 3,
-                  textAlignVertical: TextAlignVertical.center,
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: TextInputAction.newline,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  smartDashesType: SmartDashesType.disabled,
-                  smartQuotesType: SmartQuotesType.disabled,
-                  style: TextStyle(
-                    fontFamily: font.family,
-                    fontFamilyFallback: font.fallbacks,
-                    fontSize: fontSize,
-                    height: 1.25,
-                    color: colors.inputText,
-                  ),
-                  strutStyle: StrutStyle(
-                    fontFamily: font.family,
-                    fontFamilyFallback: font.fallbacks,
-                    fontSize: fontSize,
-                    height: 1.25,
-                    forceStrutHeight: true,
-                  ),
-                  cursorColor: colors.inputText,
-                  decoration: InputDecoration(
-                    hintText: 'Type a message',
-                    hintStyle: TextStyle(color: colors.hintText),
-                    filled: true,
-                    fillColor: colors.inputFill,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 11,
+                child: Listener(
+                  onPointerDown: _handleChatModePointerDown,
+                  onPointerMove: _handleChatModePointerMove,
+                  onPointerUp: _handleChatModePointerUp,
+                  onPointerCancel: _handleChatModePointerCancel,
+                  child: TextField(
+                    controller: widget.controller,
+                    focusNode: widget.focusNode,
+                    minLines: 1,
+                    maxLines: 3,
+                    textAlignVertical: TextAlignVertical.center,
+                    keyboardType: TextInputType.text,
+                    textInputAction: TextInputAction.send,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    enableInteractiveSelection: false,
+                    smartDashesType: SmartDashesType.disabled,
+                    smartQuotesType: SmartQuotesType.disabled,
+                    style: TextStyle(
+                      fontFamily: widget.font.family,
+                      fontFamilyFallback: widget.font.fallbacks,
+                      fontSize: widget.fontSize,
+                      height: 1.25,
+                      color: widget.colors.inputText,
                     ),
-                    constraints: const BoxConstraints(minHeight: 48),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: colors.border),
+                    strutStyle: StrutStyle(
+                      fontFamily: widget.font.family,
+                      fontFamilyFallback: widget.font.fallbacks,
+                      fontSize: widget.fontSize,
+                      height: 1.25,
+                      forceStrutHeight: true,
                     ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: colors.focusBorder),
+                    cursorColor: widget.colors.inputText,
+                    decoration: InputDecoration(
+                      hintText: 'Type a message',
+                      hintStyle: TextStyle(color: widget.colors.hintText),
+                      filled: true,
+                      fillColor: widget.colors.inputFill,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 11,
+                      ),
+                      constraints: const BoxConstraints(minHeight: 48),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: widget.colors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: widget.colors.focusBorder,
+                        ),
+                      ),
+                      isDense: false,
                     ),
-                    isDense: false,
+                    onTap: () => widget.focusNode.requestFocus(),
+                    onSubmitted: (_) => widget.onSend(),
                   ),
-                  onTap: () => focusNode.requestFocus(),
-                  onSubmitted: (_) => onSend(),
                 ),
               ),
               const SizedBox(width: 8),
+              IconButton.filledTonal(
+                tooltip: 'Backspace',
+                onPressed: backspace,
+                icon: const Icon(Icons.backspace_outlined),
+              ),
+              const SizedBox(width: 6),
               IconButton.filled(
                 tooltip: 'Send',
-                onPressed: sendEnabled ? onSend : null,
-                icon: sendEnabled
+                onPressed: widget.sendEnabled ? widget.onSend : null,
+                icon: widget.sendEnabled
                     ? const Icon(Icons.send)
                     : const SizedBox(
                         width: 18,
@@ -418,12 +507,282 @@ class _ChatComposer extends StatelessWidget {
               child: Text(
                 'Ready in ${cooldownSeconds}s',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: colors.mutedText,
-                  fontFamily: font.family,
-                  fontFamilyFallback: font.fallbacks,
+                  color: widget.colors.mutedText,
+                  fontFamily: widget.font.family,
+                  fontFamilyFallback: widget.font.fallbacks,
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  void _handleChatModePointerDown(PointerDownEvent event) {
+    _chatModeTimer?.cancel();
+    _chatModePointer = event.position;
+    _chatModeTimer = Timer(_chatModeHoldDelay, () {
+      final pointer = _chatModePointer ?? event.position;
+      _showChatModeMenu(pointer);
+    });
+  }
+
+  void _handleChatModePointerMove(PointerMoveEvent event) {
+    _chatModePointer = event.position;
+    if (_chatModeOverlay != null) {
+      _updateHoveredChatMode(event.position);
+    }
+  }
+
+  void _handleChatModePointerUp(PointerUpEvent event) {
+    _chatModeTimer?.cancel();
+    if (_chatModeOverlay == null) {
+      return;
+    }
+
+    _updateHoveredChatMode(event.position);
+    final selectedIndex = _hoveredChatModeIndex;
+    final selectedOption = selectedIndex == null
+        ? null
+        : _chatModeOptions[selectedIndex];
+    _removeChatModeMenu();
+    if (selectedOption != null) {
+      _applyChatMode(selectedOption);
+    }
+  }
+
+  void _handleChatModePointerCancel(PointerCancelEvent event) {
+    _chatModeTimer?.cancel();
+    _removeChatModeMenu();
+  }
+
+  void _showChatModeMenu(Offset pointer) {
+    if (!mounted || _chatModeOverlay != null) {
+      return;
+    }
+
+    final overlay = Overlay.maybeOf(context);
+    final overlayBox = overlay?.context.findRenderObject() as RenderBox?;
+    if (overlay == null || overlayBox == null || !overlayBox.hasSize) {
+      return;
+    }
+
+    final overlaySize = overlayBox.size;
+    final menuHeight =
+        (_chatModeOptions.length * _chatModeMenuItemHeight) +
+        (_chatModeMenuPadding * 2);
+    final menuWidth = overlaySize.width < (_chatModeMenuWidth + 16)
+        ? overlaySize.width - 16
+        : _chatModeMenuWidth;
+    final left = (pointer.dx - (menuWidth / 2))
+        .clamp(8.0, overlaySize.width - menuWidth - 8)
+        .toDouble();
+    final top = (pointer.dy - menuHeight - _chatModeMenuGap)
+        .clamp(8.0, overlaySize.height - menuHeight - 8)
+        .toDouble();
+
+    _chatModeMenuRect = Rect.fromLTWH(left, top, menuWidth, menuHeight);
+    _updateHoveredChatMode(_chatModePointer ?? pointer);
+    _chatModeOverlay = OverlayEntry(
+      builder: (context) {
+        final rect = _chatModeMenuRect;
+        if (rect == null) {
+          return const SizedBox.shrink();
+        }
+
+        return _ChatModeMenu(
+          rect: rect,
+          options: _chatModeOptions,
+          highlightedIndex: _hoveredChatModeIndex,
+          settings: widget.settings,
+          colors: widget.colors,
+          font: widget.font,
+        );
+      },
+    );
+    overlay.insert(_chatModeOverlay!);
+  }
+
+  void _updateHoveredChatMode(Offset pointer) {
+    final nextIndex = _chatModeIndexForPointer(pointer);
+    if (nextIndex == _hoveredChatModeIndex) {
+      return;
+    }
+
+    _hoveredChatModeIndex = nextIndex;
+    _chatModeOverlay?.markNeedsBuild();
+  }
+
+  int? _chatModeIndexForPointer(Offset pointer) {
+    final rect = _chatModeMenuRect;
+    if (rect == null || !rect.contains(pointer)) {
+      return null;
+    }
+
+    final localY = pointer.dy - rect.top - _chatModeMenuPadding;
+    if (localY < 0 ||
+        localY >= _chatModeOptions.length * _chatModeMenuItemHeight) {
+      return null;
+    }
+    return (localY / _chatModeMenuItemHeight).floor();
+  }
+
+  void _applyChatMode(_ChatModeOption option) {
+    final body = _stripChatModePrefix(widget.controller.text).trimLeft();
+    final nextText = '${option.prefix}$body';
+    widget.controller.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: nextText.length),
+    );
+    widget.focusNode.requestFocus();
+  }
+
+  String _stripChatModePrefix(String text) {
+    final normalized = text.toLowerCase();
+    for (final option in _chatModeOptions) {
+      final prefix = option.prefix;
+      if (prefix.isNotEmpty && normalized.startsWith(prefix)) {
+        return text.substring(prefix.length);
+      }
+    }
+    return text;
+  }
+
+  void _removeChatModeMenu() {
+    _chatModeOverlay?.remove();
+    _chatModeOverlay = null;
+    _chatModeMenuRect = null;
+    _hoveredChatModeIndex = null;
+  }
+}
+
+class _ChatModeOption {
+  const _ChatModeOption({
+    required this.label,
+    required this.prefix,
+    required this.role,
+  });
+
+  final String label;
+  final String prefix;
+  final ChatColorRole role;
+
+  String get shortcut => prefix.isEmpty ? 'Say' : prefix.trim();
+}
+
+class _ChatModeMenu extends StatelessWidget {
+  const _ChatModeMenu({
+    required this.rect,
+    required this.options,
+    required this.highlightedIndex,
+    required this.settings,
+    required this.colors,
+    required this.font,
+  });
+
+  final Rect rect;
+  final List<_ChatModeOption> options;
+  final int? highlightedIndex;
+  final AppSettingsController settings;
+  final _ChatSurfaceColors colors;
+  final _ChatFontSpec font;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      child: Material(
+        color: Colors.transparent,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.inputFill.withValues(alpha: 0.96),
+            border: Border.all(color: colors.focusBorder),
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x99000000),
+                blurRadius: 16,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              vertical: _ChatComposerState._chatModeMenuPadding,
+            ),
+            child: Column(
+              children: [
+                for (var index = 0; index < options.length; index += 1)
+                  _ChatModeMenuItem(
+                    option: options[index],
+                    color: settings.chatColor(options[index].role),
+                    highlighted: index == highlightedIndex,
+                    font: font,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatModeMenuItem extends StatelessWidget {
+  const _ChatModeMenuItem({
+    required this.option,
+    required this.color,
+    required this.highlighted,
+    required this.font,
+  });
+
+  final _ChatModeOption option;
+  final Color color;
+  final bool highlighted;
+  final _ChatFontSpec font;
+
+  @override
+  Widget build(BuildContext context) {
+    final labelColor = _FfxiChatStyle.contrastLabelColor(color);
+    final backgroundColor = highlighted
+        ? color.withValues(alpha: 0.22)
+        : Colors.transparent;
+
+    return Container(
+      height: _ChatComposerState._chatModeMenuItemHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      color: backgroundColor,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 46,
+            child: Text(
+              option.shortcut,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w800,
+                fontFamily: font.family,
+                fontFamilyFallback: font.fallbacks,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              option.label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: labelColor,
+                fontWeight: highlighted ? FontWeight.w800 : FontWeight.w600,
+                fontFamily: font.family,
+                fontFamilyFallback: font.fallbacks,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -571,7 +930,7 @@ class _FfxiChatStyle {
       return _FfxiChatStyle(
         label: label,
         color: color,
-        labelColor: _labelColor(color),
+        labelColor: contrastLabelColor(color),
       );
     }
 
@@ -589,7 +948,7 @@ class _FfxiChatStyle {
     if (gameColor != null) {
       return _FfxiChatStyle(
         color: gameColor,
-        labelColor: _labelColor(gameColor),
+        labelColor: contrastLabelColor(gameColor),
       );
     }
 
@@ -685,7 +1044,7 @@ class _FfxiChatStyle {
     return null;
   }
 
-  static Color _labelColor(Color color) {
+  static Color contrastLabelColor(Color color) {
     final target =
         ThemeData.estimateBrightnessForColor(color) == Brightness.dark
         ? Colors.white

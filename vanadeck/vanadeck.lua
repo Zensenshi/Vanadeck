@@ -4,7 +4,7 @@
 addon.name = 'vanadeck'
 addon.author = 'VanaDeck contributors'
 addon.version = '1.0'
-addon.desc = 'Send FFXI player status to localhost:8080 as JSON over UDP.'
+addon.desc = 'Send FFXI player status to localhost:8080 using VanaDeck binary frames.'
 
 require 'common'
 
@@ -214,6 +214,296 @@ local function create_json_encoder()
     return { encode = encode }
 end
 
+local protocol_magic = 'VDK'
+local protocol_version = 1
+local protocol_header_size = 10
+local protocol_max_payload_size = 1024 * 1024
+local protocol_type_status = 1
+local protocol_type_command = 2
+local protocol_type_hello = 3
+local protocol_value_null = 0
+local protocol_value_false = 1
+local protocol_value_true = 2
+local protocol_value_positive_int = 3
+local protocol_value_negative_int = 4
+local protocol_value_float = 5
+local protocol_value_string = 6
+local protocol_value_list = 7
+local protocol_value_map = 8
+
+local function protocol_encode_varuint(value)
+    value = math.floor(tonumber(value) or 0)
+    if value < 0 then
+        value = 0
+    end
+
+    local bytes = {}
+    repeat
+        local byte = value % 128
+        value = math.floor(value / 128)
+        if value > 0 then
+            byte = byte + 128
+        end
+        bytes[#bytes + 1] = string.char(byte)
+    until value == 0
+    return table.concat(bytes)
+end
+
+local function protocol_encode_string_payload(value)
+    value = tostring(value or '')
+    return protocol_encode_varuint(#value) .. value
+end
+
+local function protocol_is_array(value)
+    local count = 0
+    local maxIndex = 0
+    for key, _ in pairs(value) do
+        if type(key) ~= 'number' or key < 1 or key ~= math.floor(key) then
+            return false, 0
+        end
+        count = count + 1
+        if key > maxIndex then
+            maxIndex = key
+        end
+    end
+    return count == maxIndex, maxIndex
+end
+
+local protocol_encode_value
+protocol_encode_value = function(value)
+    local valueType = type(value)
+    if valueType == 'nil' then
+        return string.char(protocol_value_null)
+    end
+    if valueType == 'boolean' then
+        return string.char(value and protocol_value_true or protocol_value_false)
+    end
+    if valueType == 'number' then
+        if value == math.floor(value) then
+            if value < 0 then
+                return string.char(protocol_value_negative_int) .. protocol_encode_varuint(-value)
+            end
+            return string.char(protocol_value_positive_int) .. protocol_encode_varuint(value)
+        end
+        return string.char(protocol_value_float) .. protocol_encode_string_payload(tostring(value))
+    end
+    if valueType == 'string' then
+        return string.char(protocol_value_string) .. protocol_encode_string_payload(value)
+    end
+    if valueType == 'table' then
+        local isArray, length = protocol_is_array(value)
+        local parts = {}
+        if isArray then
+            parts[#parts + 1] = string.char(protocol_value_list)
+            parts[#parts + 1] = protocol_encode_varuint(length)
+            for index = 1, length do
+                parts[#parts + 1] = protocol_encode_value(value[index])
+            end
+            return table.concat(parts)
+        end
+
+        local count = 0
+        for _, _ in pairs(value) do
+            count = count + 1
+        end
+        parts[#parts + 1] = string.char(protocol_value_map)
+        parts[#parts + 1] = protocol_encode_varuint(count)
+        for key, item in pairs(value) do
+            parts[#parts + 1] = protocol_encode_string_payload(tostring(key))
+            parts[#parts + 1] = protocol_encode_value(item)
+        end
+        return table.concat(parts)
+    end
+
+    return string.char(protocol_value_null)
+end
+
+local function protocol_encode_uint32_be(value)
+    value = math.floor(tonumber(value) or 0)
+    local b1 = math.floor(value / 16777216) % 256
+    local b2 = math.floor(value / 65536) % 256
+    local b3 = math.floor(value / 256) % 256
+    local b4 = value % 256
+    return string.char(b1, b2, b3, b4)
+end
+
+local function protocol_decode_uint32_be(data, index)
+    local b1, b2, b3, b4 = data:byte(index, index + 3)
+    if not b4 then
+        return nil
+    end
+    return ((b1 * 256 + b2) * 256 + b3) * 256 + b4
+end
+
+local function protocol_encode_frame(messageType, payload)
+    local encodedPayload = protocol_encode_value(payload)
+    local payloadLength = #encodedPayload
+    if payloadLength > protocol_max_payload_size then
+        return nil, 'payload too large'
+    end
+
+    return table.concat({
+        protocol_magic,
+        string.char(protocol_version, messageType, 0),
+        protocol_encode_uint32_be(payloadLength),
+        encodedPayload,
+    })
+end
+
+local function protocol_decode_varuint(data, index, limit)
+    local value = 0
+    local multiplier = 1
+    while index <= limit do
+        local byte = data:byte(index)
+        value = value + (byte % 128) * multiplier
+        index = index + 1
+        if byte < 128 then
+            return value, index
+        end
+        multiplier = multiplier * 128
+        if multiplier > 9007199254740991 then
+            return nil, index, 'varuint too large'
+        end
+    end
+    return nil, index, 'truncated varuint'
+end
+
+local function protocol_decode_string_payload(data, index, limit)
+    local length, nextIndex, err = protocol_decode_varuint(data, index, limit)
+    if not length then
+        return nil, nextIndex, err
+    end
+    local endIndex = nextIndex + length - 1
+    if endIndex > limit then
+        return nil, nextIndex, 'truncated string'
+    end
+    return data:sub(nextIndex, endIndex), endIndex + 1
+end
+
+local protocol_decode_value
+protocol_decode_value = function(data, index, limit)
+    if index > limit then
+        return nil, index, 'truncated value'
+    end
+
+    local valueType = data:byte(index)
+    index = index + 1
+    if valueType == protocol_value_null then
+        return nil, index
+    end
+    if valueType == protocol_value_false then
+        return false, index
+    end
+    if valueType == protocol_value_true then
+        return true, index
+    end
+    if valueType == protocol_value_positive_int then
+        return protocol_decode_varuint(data, index, limit)
+    end
+    if valueType == protocol_value_negative_int then
+        local value, nextIndex, err = protocol_decode_varuint(data, index, limit)
+        if not value then
+            return nil, nextIndex, err
+        end
+        return -value, nextIndex
+    end
+    if valueType == protocol_value_float then
+        local value, nextIndex, err = protocol_decode_string_payload(data, index, limit)
+        if not value then
+            return nil, nextIndex, err
+        end
+        return tonumber(value), nextIndex
+    end
+    if valueType == protocol_value_string then
+        return protocol_decode_string_payload(data, index, limit)
+    end
+    if valueType == protocol_value_list then
+        local length, nextIndex, err = protocol_decode_varuint(data, index, limit)
+        if not length then
+            return nil, nextIndex, err
+        end
+
+        local values = {}
+        index = nextIndex
+        for itemIndex = 1, length do
+            local item
+            item, index, err = protocol_decode_value(data, index, limit)
+            if err then
+                return nil, index, err
+            end
+            values[itemIndex] = item
+        end
+        return values, index
+    end
+    if valueType == protocol_value_map then
+        local length, nextIndex, err = protocol_decode_varuint(data, index, limit)
+        if not length then
+            return nil, nextIndex, err
+        end
+
+        local values = {}
+        index = nextIndex
+        for _ = 1, length do
+            local key
+            key, index, err = protocol_decode_string_payload(data, index, limit)
+            if err then
+                return nil, index, err
+            end
+            local item
+            item, index, err = protocol_decode_value(data, index, limit)
+            if err then
+                return nil, index, err
+            end
+            values[key] = item
+        end
+        return values, index
+    end
+
+    return nil, index, 'unknown value type'
+end
+
+local function protocol_decode_frame(data)
+    if #data < protocol_header_size or data:sub(1, #protocol_magic) ~= protocol_magic then
+        return nil, 'invalid frame'
+    end
+
+    local version = data:byte(4)
+    if version ~= protocol_version then
+        return nil, 'unsupported version'
+    end
+
+    local messageType = data:byte(5)
+    local payloadLength = protocol_decode_uint32_be(data, 7)
+    if not payloadLength or payloadLength > protocol_max_payload_size then
+        return nil, 'invalid payload length'
+    end
+    if #data ~= protocol_header_size + payloadLength then
+        return nil, 'frame length mismatch'
+    end
+
+    local payload, nextIndex, err = protocol_decode_value(data, protocol_header_size + 1, #data)
+    if err then
+        return nil, err
+    end
+    if nextIndex ~= #data + 1 then
+        return nil, 'trailing payload bytes'
+    end
+
+    return {
+        version = version,
+        messageType = messageType,
+        payload = payload,
+    }
+end
+
+local function protocol_buffer_has_magic_prefix(buffer)
+    if #buffer == 0 then
+        return false
+    end
+    local length = math.min(#buffer, #protocol_magic)
+    return buffer:sub(1, length) == protocol_magic:sub(1, length)
+end
+
 local function create_socket_transport()
     local ok, socket = pcall(require, 'socket')
     if ok and socket and socket.tcp then
@@ -340,6 +630,31 @@ local function create_socket_transport()
         wrapper.receive = function(_, pattern)
             if rawSocket == nil then
                 return nil, 'not connected'
+            end
+
+            if type(pattern) == 'number' then
+                if #receiveBuffer > 0 then
+                    local chunk = receiveBuffer:sub(1, pattern)
+                    receiveBuffer = receiveBuffer:sub(#chunk + 1)
+                    return chunk
+                end
+
+                local bufferLength = math.min(math.max(pattern, 1), 4096)
+                local buffer = ffi.new('char[?]', bufferLength)
+                local received = ws2.recv(rawSocket, buffer, bufferLength, 0)
+                if received > 0 then
+                    return ffi.string(buffer, received)
+                end
+                if received == 0 then
+                    return nil, 'closed'
+                end
+
+                local err = ws2.WSAGetLastError()
+                if err == 10035 then
+                    return nil, 'timeout', ''
+                end
+
+                return nil, 'receive failed: ' .. tostring(err)
             end
 
             local newline = receiveBuffer:find('\n', 1, true)
@@ -473,6 +788,8 @@ local last_chat_message_at = 0
 local chat_duplicate_window = 1.5
 local max_command_length = 512
 local max_commands_per_frame = 20
+local max_command_buffer_size = 65536
+local command_receive_buffer = ''
 local macro_input_prefix = '__vanadeck_macro_input__:'
 local macro_metadata_refresh_interval = 0.75
 local ctrl_down = false
@@ -1686,6 +2003,7 @@ local function close_connection()
         pcall(function() client:close() end)
         client = nil
     end
+    command_receive_buffer = ''
 end
 
 local function close_status_client()
@@ -1725,6 +2043,20 @@ local function connect_status_client()
     return true
 end
 
+local function send_protocol_hello()
+    if not client or not client.send then
+        return
+    end
+
+    local frame = protocol_encode_frame(protocol_type_hello, {
+        protocol = 'vanadeck',
+        version = protocol_version,
+    })
+    if frame then
+        pcall(function() client:send(frame) end)
+    end
+end
+
 local function connect_client()
     if client then
         return true
@@ -1753,6 +2085,8 @@ local function connect_client()
 
     s:settimeout(0)
     client = s
+    command_receive_buffer = ''
+    send_protocol_hello()
     if not was_connected then
         print(('VanaDeck addon: connected to app on %s:%d.'):format(host, port))
         was_connected = true
@@ -1961,6 +2295,95 @@ local function capture_text_event(e, direction)
             e.messageColor))
 end
 
+local function queue_protocol_command_payload(payload)
+    local queued = 0
+    if type(payload) == 'string' then
+        queue_game_command(payload)
+        return 1
+    end
+    if type(payload) ~= 'table' then
+        return 0
+    end
+
+    for index = 1, #payload do
+        if type(payload[index]) == 'string' then
+            queue_game_command(payload[index])
+            queued = queued + 1
+            if queued >= max_commands_per_frame then
+                return queued
+            end
+        end
+    end
+    return queued
+end
+
+local function process_command_receive_buffer()
+    local processed = 0
+    while processed < max_commands_per_frame and #command_receive_buffer > 0 do
+        if protocol_buffer_has_magic_prefix(command_receive_buffer) then
+            if #command_receive_buffer < #protocol_magic then
+                return processed
+            end
+            if command_receive_buffer:sub(1, #protocol_magic) == protocol_magic then
+                if #command_receive_buffer < protocol_header_size then
+                    return processed
+                end
+
+                local frameVersion = command_receive_buffer:byte(4)
+                local messageType = command_receive_buffer:byte(5)
+                if frameVersion ~= protocol_version or
+                    (messageType ~= protocol_type_status and
+                        messageType ~= protocol_type_command and
+                        messageType ~= protocol_type_hello) then
+                    local newline = command_receive_buffer:find('\n', 1, true)
+                    if not newline then
+                        return processed
+                    end
+
+                    local line = command_receive_buffer:sub(1, newline - 1):gsub('\r$', '')
+                    command_receive_buffer = command_receive_buffer:sub(newline + 1)
+                    queue_game_command(line)
+                    processed = processed + 1
+                else
+                    local payloadLength = protocol_decode_uint32_be(command_receive_buffer, 7)
+                    if not payloadLength or payloadLength > protocol_max_payload_size then
+                        command_receive_buffer = ''
+                        return processed
+                    end
+
+                    local frameLength = protocol_header_size + payloadLength
+                    if #command_receive_buffer < frameLength then
+                        return processed
+                    end
+
+                    local frameData = command_receive_buffer:sub(1, frameLength)
+                    command_receive_buffer = command_receive_buffer:sub(frameLength + 1)
+                    local frame = protocol_decode_frame(frameData)
+                    if frame and frame.messageType == protocol_type_command then
+                        processed = processed + queue_protocol_command_payload(frame.payload)
+                    end
+                end
+            else
+                return processed
+            end
+        else
+            local newline = command_receive_buffer:find('\n', 1, true)
+            if not newline then
+                if #command_receive_buffer > max_command_buffer_size then
+                    command_receive_buffer = ''
+                end
+                return processed
+            end
+
+            local line = command_receive_buffer:sub(1, newline - 1):gsub('\r$', '')
+            command_receive_buffer = command_receive_buffer:sub(newline + 1)
+            queue_game_command(line)
+            processed = processed + 1
+        end
+    end
+    return processed
+end
+
 local function receive_commands()
     if not client then
         connect_client()
@@ -1969,17 +2392,35 @@ local function receive_commands()
         return
     end
 
+    local processed = process_command_receive_buffer()
+    if processed >= max_commands_per_frame then
+        return
+    end
+
     for _ = 1, max_commands_per_frame do
-        local line, err = client:receive('*l')
-        if not line then
+        local chunk, err, partial = client:receive(4096)
+        local data = chunk
+        if (not data or data == '') and type(partial) == 'string' and #partial > 0 then
+            data = partial
+        end
+
+        if data and #data > 0 then
+            command_receive_buffer = command_receive_buffer .. data
+            if #command_receive_buffer > max_command_buffer_size then
+                command_receive_buffer = ''
+                return
+            end
+            processed = processed + process_command_receive_buffer()
+            if processed >= max_commands_per_frame then
+                return
+            end
+        else
             if err == 'closed' then
                 was_connected = false
                 close_connection()
             end
             return
         end
-
-        queue_game_command(line)
     end
 end
 
@@ -2685,10 +3126,6 @@ local function build_status(includeEntityData)
 end
 
 local function send_status()
-    if not json then
-        return
-    end
-
     local now = os.clock()
     local includeEntityData = (now - last_full_status) >= full_status_interval
     local attemptedEntityData = includeEntityData
@@ -2707,10 +3144,22 @@ local function send_status()
         return
     end
 
-    local encoded = json.encode(payload)
+    local encoded = protocol_encode_frame(protocol_type_status, payload)
+    if not encoded and json then
+        encoded = json.encode(payload)
+    end
+    if not encoded then
+        return
+    end
     if includeEntityData and #encoded > max_udp_payload_size then
         payload.npcs = nil
-        encoded = json.encode(payload)
+        encoded = protocol_encode_frame(protocol_type_status, payload)
+        if not encoded and json then
+            encoded = json.encode(payload)
+        end
+        if not encoded then
+            return
+        end
         includeEntityData = false
     end
 
@@ -2816,7 +3265,7 @@ ashita.events.register('load', 'load_cb', function()
     if not socket.udp then
         print(('VanaDeck addon: UDP status transport unavailable (%s).'):format(socket_source or 'unknown error'))
     else
-        print(('VanaDeck addon: sending UDP status to %s:%d using %s.'):format(host, port, socket_source or 'socket'))
+        print(('VanaDeck addon: sending binary UDP status to %s:%d using %s.'):format(host, port, socket_source or 'socket'))
     end
 
     last_send = os.clock()

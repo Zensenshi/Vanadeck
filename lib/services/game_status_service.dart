@@ -5,6 +5,7 @@ import 'dart:io';
 import '../models/party_member.dart';
 import '../models/player_status.dart';
 import 'map_service.dart';
+import 'vanadeck_protocol.dart';
 
 class GameStatusService {
   const GameStatusService({
@@ -21,6 +22,8 @@ class GameStatusService {
   static Future<void>? _listenerFuture;
   static PlayerStatus? _latestStatus;
   static final Set<Socket> _commandSockets = {};
+  static final Set<Socket> _binaryCommandSockets = {};
+  static const _maxLegacySocketBufferLength = 1024 * 1024;
 
   Future<PlayerStatus> getPlayerStatus() async {
     return statusStream.first.timeout(timeout);
@@ -38,13 +41,12 @@ class GameStatusService {
   }
 
   Future<void> sendCommands(Iterable<String> commands) async {
-    final encodedCommands = commands
+    final commandTexts = commands
         .expand((command) => command.split('\n'))
         .map((command) => command.trim())
         .where((command) => command.isNotEmpty)
-        .map((command) => utf8.encode('$command\n'))
         .toList();
-    if (encodedCommands.isEmpty) {
+    if (commandTexts.isEmpty) {
       return;
     }
     if (_commandSockets.isEmpty) {
@@ -52,14 +54,35 @@ class GameStatusService {
     }
 
     final sockets = List<Socket>.of(_commandSockets);
+    final hasBinarySocket = sockets.any(_binaryCommandSockets.contains);
+    final hasLegacySocket = sockets.any(
+      (socket) => !_binaryCommandSockets.contains(socket),
+    );
+    final List<List<int>> legacyCommands = hasLegacySocket
+        ? [for (final command in commandTexts) utf8.encode('$command\n')]
+        : const <List<int>>[];
+    final List<List<int>> binaryCommands = hasBinarySocket
+        ? [
+            for (final command in commandTexts)
+              VanaDeckProtocol.encodeFrame(
+                VanaDeckMessageType.command,
+                command,
+              ),
+          ]
+        : const <List<int>>[];
+
     for (final socket in sockets) {
       try {
+        final encodedCommands = _binaryCommandSockets.contains(socket)
+            ? binaryCommands
+            : legacyCommands;
         for (final command in encodedCommands) {
           socket.add(command);
         }
         await socket.flush();
       } catch (_) {
         _commandSockets.remove(socket);
+        _binaryCommandSockets.remove(socket);
       }
     }
   }
@@ -118,21 +141,29 @@ class GameStatusService {
 
   Future<void> _handleStatusSocket(Socket socket) async {
     _commandSockets.add(socket);
+    final buffer = <int>[];
     try {
-      await for (final line
-          in socket
-              .cast<List<int>>()
-              .transform(const Utf8Decoder(allowMalformed: true))
-              .transform(const LineSplitter())) {
-        _handleStatusLine(line);
+      await for (final chunk in socket) {
+        buffer.addAll(chunk);
+        _drainStatusSocketBuffer(socket, buffer);
       }
     } finally {
       _commandSockets.remove(socket);
+      _binaryCommandSockets.remove(socket);
       await socket.close();
     }
   }
 
   void _handleStatusPayload(List<int> payload) {
+    if (VanaDeckProtocol.startsWithMagic(payload)) {
+      try {
+        _handleStatusFrame(VanaDeckProtocol.decodeFrame(payload));
+      } catch (_) {
+        return;
+      }
+      return;
+    }
+
     final text = utf8.decode(payload, allowMalformed: true).trim();
     if (text.isEmpty) {
       return;
@@ -140,6 +171,74 @@ class GameStatusService {
 
     for (final line in const LineSplitter().convert(text)) {
       _handleStatusLine(line);
+    }
+  }
+
+  void _drainStatusSocketBuffer(Socket socket, List<int> buffer) {
+    while (buffer.isNotEmpty) {
+      if (VanaDeckProtocol.matchesMagicPrefix(buffer)) {
+        if (buffer.length < VanaDeckProtocol.headerLength) {
+          return;
+        }
+
+        int? frameLength;
+        try {
+          frameLength = VanaDeckProtocol.frameLengthFromHeader(buffer);
+        } catch (_) {
+          buffer.clear();
+          return;
+        }
+        if (frameLength == null) {
+          return;
+        }
+        if (buffer.length < frameLength) {
+          return;
+        }
+
+        final frameBytes = buffer.sublist(0, frameLength);
+        buffer.removeRange(0, frameLength);
+        try {
+          _handleStatusFrame(
+            VanaDeckProtocol.decodeFrame(frameBytes),
+            socket: socket,
+          );
+        } catch (_) {
+          continue;
+        }
+        continue;
+      }
+
+      final newlineIndex = buffer.indexOf(0x0A);
+      if (newlineIndex < 0) {
+        if (buffer.length > _maxLegacySocketBufferLength) {
+          buffer.clear();
+        }
+        return;
+      }
+
+      final line = utf8
+          .decode(buffer.sublist(0, newlineIndex), allowMalformed: true)
+          .trim();
+      buffer.removeRange(0, newlineIndex + 1);
+      _handleStatusLine(line);
+    }
+  }
+
+  void _handleStatusFrame(VanaDeckFrame frame, {Socket? socket}) {
+    switch (frame.type) {
+      case VanaDeckMessageType.hello:
+        if (socket != null) {
+          _binaryCommandSockets.add(socket);
+        }
+        return;
+      case VanaDeckMessageType.status:
+        final decoded = frame.payload;
+        if (decoded is Map) {
+          _handleStatusMap(decoded.cast<String, dynamic>());
+        }
+        return;
+      case VanaDeckMessageType.command:
+        return;
     }
   }
 
@@ -152,15 +251,19 @@ class GameStatusService {
       if (decoded is! Map) {
         return;
       }
-      final status = _fromJson(decoded.cast<String, dynamic>());
-      if (status == null) {
-        return;
-      }
-      _latestStatus = status;
-      _statusController.add(status);
+      _handleStatusMap(decoded.cast<String, dynamic>());
     } catch (_) {
       return;
     }
+  }
+
+  void _handleStatusMap(Map<String, dynamic> decoded) {
+    final status = _fromJson(decoded);
+    if (status == null) {
+      return;
+    }
+    _latestStatus = status;
+    _statusController.add(status);
   }
 
   PlayerStatus? _fromJson(Map<String, dynamic> json) {

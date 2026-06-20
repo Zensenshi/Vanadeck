@@ -156,6 +156,7 @@ class MapService {
   static final Map<String, MapCoordinateCalibration> zoneCalibrations = {};
   static final Map<String, List<MappyMapEntry>> _mappyMapsByZone = {};
   static final Map<int, List<MappyMapEntry>> _mappyMapsByZoneId = {};
+  static final Map<String, Future<Uint8List?>> _mappyMapBytesByUri = {};
   static Future<void>? _mappyLoadFuture;
   static String? _mapsFolderName;
 
@@ -207,6 +208,7 @@ class MapService {
       final selected = await _mapsChannel.invokeMethod<bool>('pickMapsFolder');
       if (selected ?? false) {
         _mappyLoadFuture = null;
+        _mappyMapBytesByUri.clear();
         await loadMappyMaps();
         return true;
       }
@@ -219,17 +221,29 @@ class MapService {
     return false;
   }
 
-  static Future<Uint8List?> loadMappyMapBytes(String imageUri) async {
-    try {
-      return await _mapsChannel.invokeMethod<Uint8List>(
-        'loadMapImage',
-        imageUri,
-      );
-    } on MissingPluginException {
-      return null;
-    } on PlatformException {
-      return null;
-    }
+  static Future<Uint8List?> loadMappyMapBytes(String imageUri) {
+    return _mappyMapBytesByUri.putIfAbsent(imageUri, () async {
+      try {
+        final bytes = await _mapsChannel.invokeMethod<Uint8List>(
+          'loadMapImage',
+          imageUri,
+        );
+        if (bytes == null) {
+          _mappyMapBytesByUri.remove(imageUri);
+        }
+        return bytes;
+      } on MissingPluginException {
+        _mappyMapBytesByUri.remove(imageUri);
+        return null;
+      } on PlatformException {
+        _mappyMapBytesByUri.remove(imageUri);
+        return null;
+      }
+    });
+  }
+
+  static void clearMappyMapImageCache() {
+    _mappyMapBytesByUri.clear();
   }
 
   static MappyMapEntry? getMappyMapEntry(
