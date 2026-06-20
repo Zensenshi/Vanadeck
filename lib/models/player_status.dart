@@ -25,6 +25,7 @@ class PlayerStatus {
     this.chatMessages = const [],
     this.mapEntities = const [],
     this.activeTarget,
+    this.castState,
     this.isSubTargetActive = false,
   });
 
@@ -48,6 +49,7 @@ class PlayerStatus {
   final List<ChatMessage> chatMessages;
   final List<MapEntityLocation> mapEntities;
   final ActiveTarget? activeTarget;
+  final PlayerCastState? castState;
   final bool isSubTargetActive;
 
   double get hpPercent => maxHp == 0 ? 0 : currentHp / maxHp;
@@ -58,6 +60,22 @@ class PlayerStatus {
     final total = currentExp + expToNextLevel;
     return total <= 0 ? 0 : currentExp / total;
   }
+}
+
+class PlayerCastState {
+  const PlayerCastState({
+    required this.isCasting,
+    this.progress,
+    this.count,
+    this.max,
+    this.castType,
+  });
+
+  final bool isCasting;
+  final double? progress;
+  final double? count;
+  final double? max;
+  final int? castType;
 }
 
 class ActiveTarget {

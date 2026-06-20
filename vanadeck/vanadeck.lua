@@ -1,10 +1,10 @@
 -- VanaDeck Ashita Addon
--- Sends live player and party status over TCP to the companion Flutter app.
+-- Sends live player and party status over UDP to the companion Flutter app.
 
 addon.name = 'vanadeck'
 addon.author = 'VanaDeck contributors'
 addon.version = '1.0'
-addon.desc = 'Send FFXI player status to localhost:8080 as newline-delimited JSON.'
+addon.desc = 'Send FFXI player status to localhost:8080 as JSON over UDP.'
 
 require 'common'
 
@@ -383,6 +383,57 @@ local function create_socket_transport()
         return wrapper
     end
 
+    transport.udp = function()
+        local rawSocket = nil
+        local wrapper = {}
+
+        wrapper.settimeout = function() end
+
+        wrapper.setpeername = function(_, address, targetPort)
+            rawSocket = ws2.socket(2, 2, 17)
+            if rawSocket == ffi.cast('SOCKET', -1) then
+                return nil, 'socket failed: ' .. tostring(ws2.WSAGetLastError())
+            end
+
+            local sockaddr = ffi.new('struct sockaddr_in')
+            sockaddr.sin_family = 2
+            sockaddr.sin_port = ws2.htons(targetPort)
+            sockaddr.sin_addr.s_addr = ws2.inet_addr(address)
+
+            local result = ws2.connect(rawSocket, ffi.cast('const struct sockaddr*', sockaddr), ffi.sizeof(sockaddr))
+            if result ~= 0 then
+                local err = ws2.WSAGetLastError()
+                ws2.closesocket(rawSocket)
+                rawSocket = nil
+                return nil, 'udp peer failed: ' .. tostring(err)
+            end
+
+            return true
+        end
+
+        wrapper.send = function(_, payload)
+            if rawSocket == nil then
+                return nil, 'not connected'
+            end
+
+            local sent = ws2.send(rawSocket, payload, #payload, 0)
+            if sent < 0 then
+                return nil, 'udp send failed: ' .. tostring(ws2.WSAGetLastError())
+            end
+
+            return sent
+        end
+
+        wrapper.close = function()
+            if rawSocket ~= nil then
+                ws2.closesocket(rawSocket)
+                rawSocket = nil
+            end
+        end
+
+        return wrapper
+    end
+
     return transport, 'WinSock FFI'
 end
 
@@ -395,13 +446,19 @@ if not macro_ok then
 end
 
 local client = nil
+local status_client = nil
 local last_send = 0
-local send_interval = 1.0
+local send_interval = 0.1
 local subtarget_send_interval = 0.08
+local full_status_interval = 1.0
+local last_full_status = 0
+local max_udp_payload_size = 60000
 local last_subtarget_active = false
 local host = '127.0.0.1'
 local port = 8080
 local was_connected = false
+local last_command_connect_attempt = 0
+local command_connect_interval = 1.0
 local active_macro_book = 1
 local active_macro_set = 1
 local manual_subtarget_party_index = nil
@@ -409,6 +466,8 @@ local manual_subtarget_expires_at = 0
 local chat_messages = {}
 local max_chat_messages = 80
 local chat_sequence = 0
+local last_sent_chat_sequence = 0
+local chat_snapshot_sent = false
 local last_chat_message_key = nil
 local last_chat_message_at = 0
 local chat_duplicate_window = 1.5
@@ -432,6 +491,8 @@ local macro_metadata_cache = {
     names = {},
     needsTarget = {},
 }
+local last_sent_macro_metadata_key = ''
+local last_sent_macro_metadata_signature = ''
 
 local key_ffi_ok, loaded_key_ffi = pcall(require, 'ffi')
 if key_ffi_ok then
@@ -746,6 +807,15 @@ local function read_macro_metadata()
     return macro_metadata_cache.names, macro_metadata_cache.needsTarget
 end
 
+local function macro_metadata_signature(names, needsTarget)
+    local parts = {}
+    for index = 1, 20 do
+        parts[#parts + 1] = names[index] or ''
+        parts[#parts + 1] = needsTarget[index] and '1' or '0'
+    end
+    return table.concat(parts, '\30')
+end
+
 local function update_active_macro_state()
     if macro_lib and macro_lib.get_fsmacro then
         local ok, macro_obj = pcall(macro_lib.get_fsmacro)
@@ -768,12 +838,9 @@ local function update_active_macro_state()
         end
     end
 
-    local names, needsTarget = read_macro_metadata()
     return {
         activeBook = active_macro_book,
         activeSet = active_macro_set,
-        names = names,
-        needsTarget = needsTarget,
     }
 end
 
@@ -1621,20 +1688,63 @@ local function close_connection()
     end
 end
 
+local function close_status_client()
+    if status_client then
+        pcall(function() status_client:close() end)
+        status_client = nil
+    end
+end
+
+local function connect_status_client()
+    if status_client then
+        return true
+    end
+    if not socket or not socket.udp then
+        return false
+    end
+
+    local s = socket.udp()
+    if not s then
+        return false
+    end
+
+    if s.settimeout then
+        pcall(function() s:settimeout(0) end)
+    end
+
+    local ok = nil
+    if s.setpeername then
+        ok = s:setpeername(host, port)
+    end
+    if not ok then
+        pcall(function() s:close() end)
+        return false
+    end
+
+    status_client = s
+    return true
+end
+
 local function connect_client()
     if client then
         return true
     end
-    if not socket then
+    if not socket or not socket.tcp then
         return false
     end
+
+    local now = os.clock()
+    if (now - last_command_connect_attempt) < command_connect_interval then
+        return false
+    end
+    last_command_connect_attempt = now
 
     local s, err = socket.tcp()
     if not s then
         return false
     end
 
-    s:settimeout(1.0)
+    s:settimeout(0.05)
     local ok, connect_err = s:connect(host, port)
     if not ok then
         pcall(function() s:close() end)
@@ -1786,21 +1896,29 @@ local function append_chat_message(mode, message, direction, blocked, color)
     end
 end
 
-local function copy_chat_messages()
+local function copy_chat_messages_since(sequence)
+    sequence = tonumber(sequence) or 0
     local messages = {}
+    local latestSequence = sequence
     for index = 1, #chat_messages do
         local message = chat_messages[index]
-        messages[index] = {
-            id = message.id,
-            mode = message.mode,
-            text = message.text,
-            color = message.color,
-            time = message.time,
-            direction = message.direction,
-            blocked = message.blocked,
-        }
+        local messageId = tonumber(message.id) or 0
+        if messageId > sequence then
+            messages[#messages + 1] = {
+                id = message.id,
+                mode = message.mode,
+                text = message.text,
+                color = message.color,
+                time = message.time,
+                direction = message.direction,
+                blocked = message.blocked,
+            }
+            if messageId > latestSequence then
+                latestSequence = messageId
+            end
+        end
     end
-    return messages
+    return messages, latestSequence
 end
 
 local function capture_text_event(e, direction)
@@ -1844,6 +1962,9 @@ local function capture_text_event(e, direction)
 end
 
 local function receive_commands()
+    if not client then
+        connect_client()
+    end
     if not client or not client.receive then
         return
     end
@@ -1895,6 +2016,70 @@ local function get_entity_coordinates(entity, mapScale)
         worldY,
         worldZ,
         heading
+end
+
+local function is_valid_player_entity(entity)
+    return entity ~= nil and
+        entity.Movement ~= nil and
+        entity.Movement.LocalPosition ~= nil
+end
+
+local function call_castbar_number(castbar, method_name)
+    if not castbar or not method_name then
+        return nil
+    end
+
+    local ok, value = pcall(function()
+        return castbar[method_name](castbar)
+    end)
+    if not ok then
+        return nil
+    end
+
+    return tonumber(value)
+end
+
+local function read_cast_state(memory)
+    if not memory then
+        return nil
+    end
+
+    local castbar = call_object_method(memory, 'GetCastBar')
+    if not castbar then
+        return nil
+    end
+
+    local max = call_castbar_number(castbar, 'GetMax')
+    local count = call_castbar_number(castbar, 'GetCount')
+    local progress = call_castbar_number(castbar, 'GetPercent')
+    local castType = call_castbar_number(castbar, 'GetCastType')
+
+    if progress == nil and max ~= nil and max > 0 and count ~= nil then
+        progress = count / max
+    end
+
+    if progress ~= nil then
+        progress = math.max(0, math.min(1, progress))
+    end
+
+    local isCasting = false
+    if count ~= nil and count > 0 then
+        isCasting = true
+    elseif max ~= nil and max > 0 and progress ~= nil and progress > 0 and progress < 1 then
+        isCasting = true
+    end
+
+    if max == nil and count == nil and progress == nil and castType == nil then
+        return nil
+    end
+
+    return {
+        isCasting = isCasting,
+        progress = progress,
+        count = count,
+        max = max,
+        castType = castType,
+    }
 end
 
 local function get_sub_map_num(player)
@@ -2329,7 +2514,7 @@ local function build_active_target(memory, party, zoneName, zoneId, subMapNum, z
     return targetData
 end
 
-local function build_status()
+local function build_status(includeEntityData)
     local memory = AshitaCore:GetMemoryManager()
     if not memory then
         return nil
@@ -2338,6 +2523,17 @@ local function build_status()
     local player = memory:GetPlayer()
     local party = memory:GetParty()
     if not player or not party then
+        return nil
+    end
+
+    local playerActive = tonumber(call_object_method(party, 'GetMemberIsActive', 0)) or 0
+    local playerServerId = tonumber(call_object_method(party, 'GetMemberServerId', 0)) or 0
+    if playerActive == 0 or playerServerId == 0 then
+        return nil
+    end
+
+    local playerEntity = GetPlayerEntity()
+    if not is_valid_player_entity(playerEntity) then
         return nil
     end
 
@@ -2360,7 +2556,6 @@ local function build_status()
         end
     end
 
-    local playerEntity = GetPlayerEntity()
     local playerX, playerY, playerWorldX, playerWorldY, playerWorldZ, playerHeading = get_entity_coordinates(playerEntity, mapScale)
     local playerName = party:GetMemberName(0) or ''
     if playerName == '' and playerEntity then
@@ -2371,8 +2566,26 @@ local function build_status()
     local playerMaxHp = player:GetHPMax() or estimate_max(playerHp, party:GetMemberHPPercent(0) or 0)
     local playerMaxMp = player:GetMPMax() or estimate_max(playerMp, party:GetMemberMPPercent(0) or 0)
     local macroState = update_active_macro_state()
+    local sentMacroMetadataKey = nil
+    local sentMacroMetadataSignature = nil
+    local macroMetadataKey = ('%d:%d'):format(
+        macroState.activeBook or 0,
+        macroState.activeSet or 0)
+    if macroMetadataKey ~= last_sent_macro_metadata_key or includeEntityData then
+        local names, needsTarget = read_macro_metadata()
+        local signature = macro_metadata_signature(names, needsTarget)
+        if macroMetadataKey ~= last_sent_macro_metadata_key or
+            signature ~= last_sent_macro_metadata_signature then
+            macroState.names = names
+            macroState.needsTarget = needsTarget
+            sentMacroMetadataKey = macroMetadataKey
+            sentMacroMetadataSignature = signature
+        end
+    end
+
     local subTargetActive = is_subtarget_active()
     local activeTarget = build_active_target(memory, party, zoneName, zoneId, subMapNum, zoneIsTown)
+    local castState = read_cast_state(memory)
     local currentExp, expToNextLevel, expNeeded = read_player_experience(player)
     local playerLevel = player:GetMainJobLevel() or 0
 
@@ -2404,14 +2617,16 @@ local function build_status()
             activeMacroSet = macroState.activeSet,
             isSubTargetActive = subTargetActive,
             activeTarget = activeTarget,
+            cast = castState,
+            entityReady = true,
         },
         partyMembers = {},
         party = {},
-        npcs = {},
         target = activeTarget,
+        cast = castState,
         isSubTargetActive = subTargetActive,
+        playerEntityReady = true,
         macro = macroState,
-        chatMessages = copy_chat_messages(),
         level = playerLevel,
         currentExp = currentExp,
         expToNextLevel = expToNextLevel,
@@ -2451,9 +2666,22 @@ local function build_status()
         end
     end
 
-    status.npcs = build_npc_data(entityInterface, mapScale, zoneName, zoneId, subMapNum, zoneIsTown)
+    if includeEntityData then
+        status.npcs = build_npc_data(entityInterface, mapScale, zoneName, zoneId, subMapNum, zoneIsTown)
+    end
 
-    return status
+    local sentChatSequence = nil
+    if includeEntityData then
+        local chatMessages, latestChatSequence = copy_chat_messages_since(last_sent_chat_sequence)
+        if #chatMessages > 0 or not chat_snapshot_sent then
+            status.chatMessages = chatMessages
+            status.chatIncremental = true
+            status.chatSnapshot = not chat_snapshot_sent
+            sentChatSequence = latestChatSequence
+        end
+    end
+
+    return status, sentMacroMetadataKey, sentMacroMetadataSignature, sentChatSequence
 end
 
 local function send_status()
@@ -2461,25 +2689,47 @@ local function send_status()
         return
     end
 
-    local payload = build_status()
+    local now = os.clock()
+    local includeEntityData = (now - last_full_status) >= full_status_interval
+    local attemptedEntityData = includeEntityData
+    local ok, payload, sentMacroMetadataKey, sentMacroMetadataSignature, sentChatSequence =
+        pcall(build_status, includeEntityData)
+    if not ok then
+        return
+    end
     if not payload then
         return
     end
 
-    local connected = connect_client()
+    local connected = connect_status_client()
     if not connected then
-        close_connection()
+        close_status_client()
         return
     end
 
-    local encoded = json.encode(payload) .. '\n'
-    local success, err = client:send(encoded)
+    local encoded = json.encode(payload)
+    if includeEntityData and #encoded > max_udp_payload_size then
+        payload.npcs = nil
+        encoded = json.encode(payload)
+        includeEntityData = false
+    end
+
+    local success, err = status_client:send(encoded)
     if not success then
-        if was_connected then
-            print('VanaDeck addon: app connection lost.')
-        end
-        was_connected = false
-        close_connection()
+        close_status_client()
+        return
+    end
+
+    if attemptedEntityData then
+        last_full_status = now
+    end
+    if sentMacroMetadataKey and sentMacroMetadataSignature then
+        last_sent_macro_metadata_key = sentMacroMetadataKey
+        last_sent_macro_metadata_signature = sentMacroMetadataSignature
+    end
+    if sentChatSequence then
+        last_sent_chat_sequence = sentChatSequence
+        chat_snapshot_sent = true
     end
 end
 
@@ -2563,8 +2813,12 @@ ashita.events.register('load', 'load_cb', function()
         print(('VanaDeck addon: socket transport unavailable (%s).'):format(socket_source or 'unknown error'))
         return
     end
+    if not socket.udp then
+        print(('VanaDeck addon: UDP status transport unavailable (%s).'):format(socket_source or 'unknown error'))
+    else
+        print(('VanaDeck addon: sending UDP status to %s:%d using %s.'):format(host, port, socket_source or 'socket'))
+    end
 
-    print(('VanaDeck addon: sending status to %s:%d using %s.'):format(host, port, socket_source or 'socket'))
     last_send = os.clock()
 end)
 
@@ -2587,4 +2841,5 @@ end)
 ashita.events.register('unload', 'unload_cb', function()
     was_connected = false
     close_connection()
+    close_status_client()
 end)
