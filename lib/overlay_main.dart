@@ -670,7 +670,7 @@ class _OverlayControlBar extends StatelessWidget {
           style: iconBarColorStyle,
           baseColor: palette.handle,
         );
-        final barDecoration = BoxDecoration(
+        final customBarDecoration = BoxDecoration(
           color: barColor,
           gradient: iconBarColors.iconBarGradient(
             style: iconBarColorStyle,
@@ -678,6 +678,9 @@ class _OverlayControlBar extends StatelessWidget {
             vertical: _vertical,
           ),
         );
+        final barDecoration = appearance == OverlayAppearance.gameGlass
+            ? BoxDecoration(color: palette.surface, gradient: palette.gradient)
+            : customBarDecoration;
         final tabButtons = [
           for (final tab in _OverlayTab.values)
             _OverlayIconBarButton(
