@@ -39,6 +39,8 @@ To load VanaDeck automatically, add the same command to your Ashita startup scri
 
 The current bridge uses `127.0.0.1:8080`: status updates are versioned VanaDeck binary frames over UDP, while app-to-game macro and chat commands use a TCP connection on the same port. The app still accepts legacy JSON status payloads, and the addon still accepts legacy newline TCP commands during upgrades. That means the app and addon must be running in the same local environment unless you change the bridge configuration in source.
 
+If the addon prints `connected to app on 127.0.0.1:8080` but VanaDeck still shows no live data, install a release APK built with the Android `INTERNET` permission in the main manifest. Android requires that permission for localhost sockets too, and older release builds without it cannot reliably listen for the bridge. Also start VanaDeck before loading the addon, and make sure no other local service is using port `8080`.
+
 ## Optional Resources
 
 VanaDeck does not bundle maps, status icons, DAT files, or extracted game assets. It supports user-provided Mappy and XiView-style resources through app settings:

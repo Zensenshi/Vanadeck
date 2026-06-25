@@ -218,6 +218,13 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
   }
 
+  Future<void> _setOverlayMacroButtonStyle(
+    OverlayMacroButtonStyle style,
+  ) async {
+    await widget.settings.setOverlayMacroButtonStyle(style);
+    await _updateRunningOverlayTheme();
+  }
+
   Future<void> _setDarkMode() async {
     await widget.settings.setOledBlack(false);
     await widget.settings.setThemeMode(ThemeMode.dark);
@@ -286,6 +293,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         iconBarColors: widget.settings.iconBarColors,
         buttonColor: widget.settings.buttonColor,
         buttonTextColor: widget.settings.buttonTextColor,
+        macroButtonStyle: widget.settings.overlayMacroButtonStyle,
       );
     }
   }
@@ -478,12 +486,14 @@ class _SettingsScreenState extends State<SettingsScreen>
                       scale: widget.settings.overlayScale,
                       appearance: widget.settings.overlayAppearance,
                       tabPosition: widget.settings.overlayTabPosition,
+                      macroButtonStyle: widget.settings.overlayMacroButtonStyle,
                       onRequestPermission: _requestOverlayPermission,
                       onStart: _startOverlay,
                       onStop: _stopOverlay,
                       onScaleChanged: _setOverlayScale,
                       onAppearanceChanged: _setOverlayAppearance,
                       onTabPositionChanged: _setOverlayTabPosition,
+                      onMacroButtonStyleChanged: _setOverlayMacroButtonStyle,
                     ),
                   ],
                 ),
@@ -750,12 +760,14 @@ class _OverlaySetting extends StatelessWidget {
     required this.scale,
     required this.appearance,
     required this.tabPosition,
+    required this.macroButtonStyle,
     required this.onRequestPermission,
     required this.onStart,
     required this.onStop,
     required this.onScaleChanged,
     required this.onAppearanceChanged,
     required this.onTabPositionChanged,
+    required this.onMacroButtonStyleChanged,
   });
 
   final bool supported;
@@ -765,12 +777,14 @@ class _OverlaySetting extends StatelessWidget {
   final double scale;
   final OverlayAppearance appearance;
   final OverlayTabPosition tabPosition;
+  final OverlayMacroButtonStyle macroButtonStyle;
   final Future<void> Function() onRequestPermission;
   final Future<void> Function() onStart;
   final Future<void> Function() onStop;
   final ValueChanged<double> onScaleChanged;
   final ValueChanged<OverlayAppearance> onAppearanceChanged;
   final ValueChanged<OverlayTabPosition> onTabPositionChanged;
+  final ValueChanged<OverlayMacroButtonStyle> onMacroButtonStyleChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -864,6 +878,20 @@ class _OverlaySetting extends StatelessWidget {
           showSelectedIcon: false,
           onSelectionChanged: supported
               ? (selection) => onAppearanceChanged(selection.first)
+              : null,
+        ),
+        const SizedBox(height: 14),
+        Text('Macro buttons', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        SegmentedButton<OverlayMacroButtonStyle>(
+          segments: [
+            for (final option in OverlayMacroButtonStyle.values)
+              ButtonSegment(value: option, label: Text(option.label)),
+          ],
+          selected: {macroButtonStyle},
+          showSelectedIcon: false,
+          onSelectionChanged: supported
+              ? (selection) => onMacroButtonStyleChanged(selection.first)
               : null,
         ),
         const SizedBox(height: 14),

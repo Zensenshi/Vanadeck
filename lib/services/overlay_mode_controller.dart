@@ -73,6 +73,7 @@ class OverlayModeController {
       scale: settings.overlayScale,
       appearance: settings.overlayAppearance,
       tabPosition: settings.overlayTabPosition,
+      macroButtonStyle: settings.overlayMacroButtonStyle,
     );
     await Future<void>.delayed(_startSettleDelay);
 
