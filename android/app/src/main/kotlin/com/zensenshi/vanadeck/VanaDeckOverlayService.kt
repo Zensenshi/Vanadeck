@@ -43,6 +43,7 @@ class VanaDeckOverlayService : Service() {
     const val EXTRA_ICON_BAR_END_COLOR = "icon_bar_end_color"
     const val EXTRA_BUTTON_COLOR = "button_color"
     const val EXTRA_BUTTON_TEXT_COLOR = "button_text_color"
+    const val EXTRA_MACRO_BUTTON_STYLE = "macro_button_style"
     const val EXTRA_DISPLAY_ID = "display_id"
     const val DEFAULT_SCALE = 0.41
     const val DEFAULT_APPEARANCE = "gameGlass"
@@ -126,6 +127,7 @@ class VanaDeckOverlayService : Service() {
           iconBarEndColor = optionalIntExtra(intent, EXTRA_ICON_BAR_END_COLOR),
           buttonColor = optionalIntExtra(intent, EXTRA_BUTTON_COLOR),
           buttonTextColor = optionalIntExtra(intent, EXTRA_BUTTON_TEXT_COLOR),
+          macroButtonStyle = intent.getStringExtra(EXTRA_MACRO_BUTTON_STYLE),
         )
         return START_STICKY
       }
@@ -366,6 +368,7 @@ class VanaDeckOverlayService : Service() {
     iconBarEndColor: Int?,
     buttonColor: Int?,
     buttonTextColor: Int?,
+    macroButtonStyle: String?,
   ) {
     overlayChannel?.invokeMethod(
       "setOverlayTheme",
@@ -375,6 +378,7 @@ class VanaDeckOverlayService : Service() {
         "iconBarEndColor" to iconBarEndColor,
         "buttonColor" to buttonColor,
         "buttonTextColor" to buttonTextColor,
+        "macroButtonStyle" to macroButtonStyle,
       ),
     )
   }

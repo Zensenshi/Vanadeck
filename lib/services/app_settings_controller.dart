@@ -27,6 +27,15 @@ enum OverlayTabPosition {
   final String label;
 }
 
+enum OverlayMacroButtonStyle {
+  themed('Button color'),
+  gameGlass('Game glass');
+
+  const OverlayMacroButtonStyle(this.label);
+
+  final String label;
+}
+
 enum ColorFillStyle {
   solid('Solid'),
   gradation('Gradation');
@@ -173,6 +182,8 @@ class AppSettingsController extends ChangeNotifier {
       AppSettingsService.defaultOverlayAppearance;
   OverlayTabPosition _overlayTabPosition =
       AppSettingsService.defaultOverlayTabPosition;
+  OverlayMacroButtonStyle _overlayMacroButtonStyle =
+      AppSettingsService.defaultOverlayMacroButtonStyle;
   String? _lastKeyboardId;
   String? _lastKeyboardName;
   String? _resourceFolderName;
@@ -230,6 +241,9 @@ class AppSettingsController extends ChangeNotifier {
 
   OverlayTabPosition get overlayTabPosition => _overlayTabPosition;
 
+  OverlayMacroButtonStyle get overlayMacroButtonStyle =>
+      _overlayMacroButtonStyle;
+
   String? get lastKeyboardId => _lastKeyboardId;
 
   String? get lastKeyboardName => _lastKeyboardName;
@@ -266,6 +280,7 @@ class AppSettingsController extends ChangeNotifier {
     _overlayScale = settings.overlayScale;
     _overlayAppearance = settings.overlayAppearance;
     _overlayTabPosition = settings.overlayTabPosition;
+    _overlayMacroButtonStyle = settings.overlayMacroButtonStyle;
     _lastKeyboardId = settings.lastKeyboardId;
     _lastKeyboardName = settings.lastKeyboardName;
     _resourceFolderName = settings.resourceFolderName;
@@ -429,6 +444,12 @@ class AppSettingsController extends ChangeNotifier {
     await _service.saveOverlayTabPosition(position);
   }
 
+  Future<void> setOverlayMacroButtonStyle(OverlayMacroButtonStyle style) async {
+    _overlayMacroButtonStyle = style;
+    notifyListeners();
+    await _service.saveOverlayMacroButtonStyle(style);
+  }
+
   Future<void> rememberKeyboard({String? id, String? name}) async {
     final normalizedId = id?.trim();
     if (normalizedId == null || normalizedId.isEmpty) {
@@ -514,6 +535,7 @@ class AppSettings {
     required this.overlayScale,
     required this.overlayAppearance,
     required this.overlayTabPosition,
+    required this.overlayMacroButtonStyle,
     this.lastKeyboardId,
     this.lastKeyboardName,
     this.resourceFolderName,
@@ -537,6 +559,7 @@ class AppSettings {
   final double overlayScale;
   final OverlayAppearance overlayAppearance;
   final OverlayTabPosition overlayTabPosition;
+  final OverlayMacroButtonStyle overlayMacroButtonStyle;
   final String? lastKeyboardId;
   final String? lastKeyboardName;
   final String? resourceFolderName;
@@ -558,6 +581,7 @@ class AppSettingsService {
   static const _overlayScaleKey = 'overlay_scale';
   static const _overlayAppearanceKey = 'overlay_appearance';
   static const _overlayTabPositionKey = 'overlay_tab_position';
+  static const _overlayMacroButtonStyleKey = 'overlay_macro_button_style';
   static const _backgroundGradientSchemeKey = 'background_gradient_scheme';
   static const _backgroundColorStyleKey = 'background_color_style';
   static const _surfaceGradientStartColorKey = 'surface_gradient_start_color';
@@ -573,6 +597,7 @@ class AppSettingsService {
   static const defaultOverlayScale = 0.41;
   static const defaultOverlayAppearance = OverlayAppearance.gameGlass;
   static const defaultOverlayTabPosition = OverlayTabPosition.top;
+  static const defaultOverlayMacroButtonStyle = OverlayMacroButtonStyle.themed;
   static const defaultIconBarColors = SurfaceGradientColors(
     start: AppSettingsController.defaultSeedColor,
     end: Color(0xFF1C7C82),
@@ -600,6 +625,7 @@ class AppSettingsService {
     final overlayScale = await _loadOverlayScale();
     final overlayAppearance = await loadOverlayAppearance();
     final overlayTabPosition = await loadOverlayTabPosition();
+    final overlayMacroButtonStyle = await loadOverlayMacroButtonStyle();
     final lastKeyboardId = await _loadSetting(_lastKeyboardIdKey);
     final lastKeyboardName = await _loadSetting(_lastKeyboardNameKey);
     final folderName = await resourceFolderName();
@@ -622,6 +648,7 @@ class AppSettingsService {
       overlayScale: overlayScale,
       overlayAppearance: overlayAppearance,
       overlayTabPosition: overlayTabPosition,
+      overlayMacroButtonStyle: overlayMacroButtonStyle,
       lastKeyboardId: lastKeyboardId,
       lastKeyboardName: lastKeyboardName,
       resourceFolderName: folderName,
@@ -764,6 +791,12 @@ class AppSettingsService {
     await _saveSetting(_overlayTabPositionKey, position.name);
   }
 
+  Future<void> saveOverlayMacroButtonStyle(
+    OverlayMacroButtonStyle style,
+  ) async {
+    await _saveSetting(_overlayMacroButtonStyleKey, style.name);
+  }
+
   Future<OverlayAppearance> loadOverlayAppearance() async {
     final value = await _loadSetting(_overlayAppearanceKey);
     return OverlayAppearance.values.firstWhere(
@@ -777,6 +810,14 @@ class AppSettingsService {
     return OverlayTabPosition.values.firstWhere(
       (position) => position.name == value,
       orElse: () => defaultOverlayTabPosition,
+    );
+  }
+
+  Future<OverlayMacroButtonStyle> loadOverlayMacroButtonStyle() async {
+    final value = await _loadSetting(_overlayMacroButtonStyleKey);
+    return OverlayMacroButtonStyle.values.firstWhere(
+      (style) => style.name == value,
+      orElse: () => defaultOverlayMacroButtonStyle,
     );
   }
 

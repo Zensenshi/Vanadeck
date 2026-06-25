@@ -61,12 +61,14 @@ class OverlayService {
     required double scale,
     required OverlayAppearance appearance,
     required OverlayTabPosition tabPosition,
+    required OverlayMacroButtonStyle macroButtonStyle,
   }) async {
     try {
       return await _channel.invokeMethod<bool>('start', {
             'scale': scale,
             'appearance': appearance.name,
             'tabPosition': tabPosition.name,
+            'macroButtonStyle': macroButtonStyle.name,
           }) ??
           false;
     } on MissingPluginException {
@@ -125,6 +127,7 @@ class OverlayService {
     required SurfaceGradientColors iconBarColors,
     required Color buttonColor,
     required Color buttonTextColor,
+    required OverlayMacroButtonStyle macroButtonStyle,
   }) async {
     try {
       await _channel.invokeMethod<void>('updateOverlayTheme', {
@@ -133,6 +136,7 @@ class OverlayService {
         'iconBarEndColor': iconBarColors.end.toARGB32().toSigned(32),
         'buttonColor': buttonColor.toARGB32().toSigned(32),
         'buttonTextColor': buttonTextColor.toARGB32().toSigned(32),
+        'macroButtonStyle': macroButtonStyle.name,
       });
     } on MissingPluginException {
       return;

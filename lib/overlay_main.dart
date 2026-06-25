@@ -37,6 +37,8 @@ class _VanaDeckOverlayAppState extends State<VanaDeckOverlayApp> {
   Color _buttonTextColor = AppSettingsController.defaultButtonTextColor;
   Color _macroCastFeedbackColor =
       AppSettingsController.defaultCastFeedbackColor;
+  OverlayMacroButtonStyle _macroButtonStyle =
+      AppSettingsService.defaultOverlayMacroButtonStyle;
 
   @override
   void initState() {
@@ -60,6 +62,7 @@ class _VanaDeckOverlayAppState extends State<VanaDeckOverlayApp> {
     final buttonColor = await service.loadButtonColor();
     final buttonTextColor = await service.loadButtonTextColor();
     final macroCastFeedbackColor = await service.loadMacroCastFeedbackColor();
+    final macroButtonStyle = await service.loadOverlayMacroButtonStyle();
     if (!mounted) {
       return;
     }
@@ -71,6 +74,7 @@ class _VanaDeckOverlayAppState extends State<VanaDeckOverlayApp> {
       _buttonColor = buttonColor;
       _buttonTextColor = buttonTextColor;
       _macroCastFeedbackColor = macroCastFeedbackColor;
+      _macroButtonStyle = macroButtonStyle;
     });
   }
 
@@ -110,6 +114,7 @@ class _VanaDeckOverlayAppState extends State<VanaDeckOverlayApp> {
         );
         _buttonColor = theme.buttonColor ?? _buttonColor;
         _buttonTextColor = theme.buttonTextColor ?? _buttonTextColor;
+        _macroButtonStyle = theme.macroButtonStyle ?? _macroButtonStyle;
       });
     }
   }
@@ -151,11 +156,15 @@ class _VanaDeckOverlayAppState extends State<VanaDeckOverlayApp> {
     final iconBarEndColor = _parseColor(arguments['iconBarEndColor']);
     final buttonColor = _parseColor(arguments['buttonColor']);
     final buttonTextColor = _parseColor(arguments['buttonTextColor']);
+    final macroButtonStyle = _parseOverlayMacroButtonStyle(
+      arguments['macroButtonStyle'],
+    );
     if (iconBarColorStyle == null &&
         iconBarStartColor == null &&
         iconBarEndColor == null &&
         buttonColor == null &&
-        buttonTextColor == null) {
+        buttonTextColor == null &&
+        macroButtonStyle == null) {
       return null;
     }
     return _OverlayThemeUpdate(
@@ -164,6 +173,18 @@ class _VanaDeckOverlayAppState extends State<VanaDeckOverlayApp> {
       iconBarEndColor: iconBarEndColor,
       buttonColor: buttonColor,
       buttonTextColor: buttonTextColor,
+      macroButtonStyle: macroButtonStyle,
+    );
+  }
+
+  OverlayMacroButtonStyle? _parseOverlayMacroButtonStyle(Object? value) {
+    final name = value?.toString();
+    if (name == null) {
+      return null;
+    }
+    return OverlayMacroButtonStyle.values.firstWhere(
+      (style) => style.name == name,
+      orElse: () => _macroButtonStyle,
     );
   }
 
@@ -218,6 +239,7 @@ class _VanaDeckOverlayAppState extends State<VanaDeckOverlayApp> {
         buttonColor: _buttonColor,
         buttonTextColor: _buttonTextColor,
         macroCastFeedbackColor: _macroCastFeedbackColor,
+        macroButtonStyle: _macroButtonStyle,
       ),
     );
   }
@@ -230,6 +252,7 @@ class _OverlayThemeUpdate {
     this.iconBarEndColor,
     this.buttonColor,
     this.buttonTextColor,
+    this.macroButtonStyle,
   });
 
   final ColorFillStyle? iconBarColorStyle;
@@ -237,6 +260,7 @@ class _OverlayThemeUpdate {
   final Color? iconBarEndColor;
   final Color? buttonColor;
   final Color? buttonTextColor;
+  final OverlayMacroButtonStyle? macroButtonStyle;
 }
 
 class VanaDeckOverlayPanel extends StatefulWidget {
@@ -249,12 +273,14 @@ class VanaDeckOverlayPanel extends StatefulWidget {
     required this.buttonColor,
     required this.buttonTextColor,
     required this.macroCastFeedbackColor,
+    required this.macroButtonStyle,
   });
 
   final OverlayAppearance appearance;
   final OverlayTabPosition tabPosition;
   final ColorFillStyle iconBarColorStyle;
   final SurfaceGradientColors iconBarColors;
+  final OverlayMacroButtonStyle macroButtonStyle;
   final Color buttonColor;
   final Color buttonTextColor;
   final Color macroCastFeedbackColor;
@@ -437,6 +463,7 @@ class _VanaDeckOverlayPanelState extends State<VanaDeckOverlayPanel> {
                         status: status,
                         modifier: _macroModifier,
                         macroCastFeedbackColor: widget.macroCastFeedbackColor,
+                        macroButtonStyle: widget.macroButtonStyle,
                         buttonColor: widget.buttonColor,
                         buttonTextColor: widget.buttonTextColor,
                         onModifierChanged: (modifier) {
@@ -985,6 +1012,7 @@ class _OverlayTabBody extends StatelessWidget {
     required this.status,
     required this.modifier,
     required this.macroCastFeedbackColor,
+    required this.macroButtonStyle,
     required this.buttonColor,
     required this.buttonTextColor,
     required this.onModifierChanged,
@@ -1002,6 +1030,7 @@ class _OverlayTabBody extends StatelessWidget {
   final PlayerStatus status;
   final _OverlayMacroModifier modifier;
   final Color macroCastFeedbackColor;
+  final OverlayMacroButtonStyle macroButtonStyle;
   final Color buttonColor;
   final Color buttonTextColor;
   final ValueChanged<_OverlayMacroModifier> onModifierChanged;
@@ -1022,6 +1051,7 @@ class _OverlayTabBody extends StatelessWidget {
         status: status,
         modifier: modifier,
         macroCastFeedbackColor: macroCastFeedbackColor,
+        macroButtonStyle: macroButtonStyle,
         buttonColor: buttonColor,
         buttonTextColor: buttonTextColor,
         onModifierChanged: onModifierChanged,
@@ -1045,6 +1075,7 @@ class _OverlayMacroTab extends StatefulWidget {
     required this.status,
     required this.modifier,
     required this.macroCastFeedbackColor,
+    required this.macroButtonStyle,
     required this.buttonColor,
     required this.buttonTextColor,
     required this.onModifierChanged,
@@ -1054,6 +1085,7 @@ class _OverlayMacroTab extends StatefulWidget {
   final PlayerStatus status;
   final _OverlayMacroModifier modifier;
   final Color macroCastFeedbackColor;
+  final OverlayMacroButtonStyle macroButtonStyle;
   final Color buttonColor;
   final Color buttonTextColor;
   final ValueChanged<_OverlayMacroModifier> onModifierChanged;
@@ -1126,6 +1158,7 @@ class _OverlayMacroTabState extends State<_OverlayMacroTab> {
                   glowingMacroKey: _glowingMacroKey,
                   glowPulseId: _glowPulseId,
                   glowColor: widget.macroCastFeedbackColor,
+                  macroButtonStyle: widget.macroButtonStyle,
                   buttonColor: widget.buttonColor,
                   buttonTextColor: widget.buttonTextColor,
                   onMacroPressed: (context, slot, needsTarget) {
@@ -2057,6 +2090,7 @@ class _OverlayMacroGrid extends StatelessWidget {
     required this.glowingMacroKey,
     required this.glowPulseId,
     required this.glowColor,
+    required this.macroButtonStyle,
     required this.buttonColor,
     required this.buttonTextColor,
     required this.onMacroPressed,
@@ -2067,6 +2101,7 @@ class _OverlayMacroGrid extends StatelessWidget {
   final String? glowingMacroKey;
   final int glowPulseId;
   final Color glowColor;
+  final OverlayMacroButtonStyle macroButtonStyle;
   final Color buttonColor;
   final Color buttonTextColor;
   final Future<void> Function(BuildContext context, int slot, bool needsTarget)
@@ -2115,6 +2150,7 @@ class _OverlayMacroGrid extends StatelessWidget {
               glowing: glowingMacroKey == macroKey,
               glowPulseId: glowPulseId,
               glowColor: glowColor,
+              macroButtonStyle: macroButtonStyle,
               buttonColor: buttonColor,
               buttonTextColor: buttonTextColor,
               onPressed: () {
@@ -2161,6 +2197,7 @@ class _OverlayMacroButton extends StatelessWidget {
     required this.glowing,
     required this.glowPulseId,
     required this.glowColor,
+    required this.macroButtonStyle,
     required this.buttonColor,
     required this.buttonTextColor,
     required this.onPressed,
@@ -2173,6 +2210,7 @@ class _OverlayMacroButton extends StatelessWidget {
   final bool glowing;
   final int glowPulseId;
   final Color glowColor;
+  final OverlayMacroButtonStyle macroButtonStyle;
   final Color buttonColor;
   final Color buttonTextColor;
   final VoidCallback onPressed;
@@ -2203,10 +2241,23 @@ class _OverlayMacroButton extends StatelessWidget {
             : compact
             ? const EdgeInsets.symmetric(horizontal: 3, vertical: 2)
             : const EdgeInsets.symmetric(horizontal: 4, vertical: 3);
+        final glass = macroButtonStyle == OverlayMacroButtonStyle.gameGlass;
+        final radius = BorderRadius.circular(compact ? 5 : 6);
+        final glassPalette = _OverlayPalette.forAppearance(
+          OverlayAppearance.gameGlass,
+        );
+        final glassDecoration = BoxDecoration(
+          color: glassPalette.surface,
+          gradient: glassPalette.gradient,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+          borderRadius: radius,
+        );
 
         return Stack(
           fit: StackFit.expand,
           children: [
+            if (glass)
+              Positioned.fill(child: DecoratedBox(decoration: glassDecoration)),
             TextButton(
               onPressed: onPressed,
               style: ButtonStyle(
@@ -2215,6 +2266,11 @@ class _OverlayMacroButton extends StatelessWidget {
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 foregroundColor: WidgetStatePropertyAll(buttonTextColor),
                 backgroundColor: WidgetStateProperty.resolveWith((states) {
+                  if (glass) {
+                    return states.contains(WidgetState.pressed)
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : Colors.transparent;
+                  }
                   final alpha = states.contains(WidgetState.pressed)
                       ? 0.46
                       : 0.34;
@@ -2224,12 +2280,12 @@ class _OverlayMacroButton extends StatelessWidget {
                   );
                 }),
                 side: WidgetStatePropertyAll(
-                  BorderSide(color: Colors.white.withValues(alpha: 0.16)),
+                  glass
+                      ? BorderSide.none
+                      : BorderSide(color: Colors.white.withValues(alpha: 0.16)),
                 ),
                 shape: WidgetStatePropertyAll(
-                  RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(compact ? 5 : 6),
-                  ),
+                  RoundedRectangleBorder(borderRadius: radius),
                 ),
               ),
               child: Column(

@@ -508,6 +508,9 @@ class MainActivity : FlutterActivity() {
       (arguments?.get("buttonTextColor") as? Number)?.toInt()?.let {
         putExtra(VanaDeckOverlayService.EXTRA_BUTTON_TEXT_COLOR, it)
       }
+      (arguments?.get("macroButtonStyle") as? String)?.let {
+        putExtra(VanaDeckOverlayService.EXTRA_MACRO_BUTTON_STYLE, it)
+      }
     }
     try {
       startService(intent)
