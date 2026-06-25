@@ -659,90 +659,219 @@ class _OverlayControlBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final palette = _OverlayPalette.forAppearance(appearance);
-    final barColor = iconBarColors.iconBarColor(
-      style: iconBarColorStyle,
-      baseColor: palette.handle,
-    );
-    final barDecoration = BoxDecoration(
-      color: barColor,
-      gradient: iconBarColors.iconBarGradient(
-        style: iconBarColorStyle,
-        baseColor: barColor,
-        vertical: _vertical,
-      ),
-    );
-    final tabButtons = [
-      for (final tab in _OverlayTab.values)
-        _OverlayIconBarButton(
-          tab: tab,
-          selected: selectedTab == tab,
-          buttonColor: buttonColor,
-          buttonTextColor: buttonTextColor,
-          onPressed: () => onTabSelected(tab),
-        ),
-    ];
-    final minimizeButton = IconButton(
-      tooltip: 'Minimize VanaDeck',
-      onPressed: onMinimize,
-      icon: Icon(Icons.minimize, size: 17, color: buttonTextColor),
-      style: IconButton.styleFrom(
-        minimumSize: const Size.square(30),
-        fixedSize: const Size.square(30),
-        padding: EdgeInsets.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-    );
-    final stopButton = IconButton(
-      tooltip: 'Stop overlay mode',
-      onPressed: onStop,
-      icon: Icon(Icons.close_fullscreen, size: 17, color: buttonTextColor),
-      style: IconButton.styleFrom(
-        minimumSize: const Size.square(30),
-        fixedSize: const Size.square(30),
-        padding: EdgeInsets.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-    );
-
-    if (_vertical) {
-      return Container(
-        width: 40,
-        decoration: barDecoration,
-        padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
-        child: Column(
-          children: [
-            Icon(Icons.drag_indicator, size: 18, color: buttonTextColor),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: tabButtons,
-              ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final metrics = _OverlayControlBarMetrics.forConstraints(
+          constraints,
+          vertical: _vertical,
+        );
+        final palette = _OverlayPalette.forAppearance(appearance);
+        final barColor = iconBarColors.iconBarColor(
+          style: iconBarColorStyle,
+          baseColor: palette.handle,
+        );
+        final barDecoration = BoxDecoration(
+          color: barColor,
+          gradient: iconBarColors.iconBarGradient(
+            style: iconBarColorStyle,
+            baseColor: barColor,
+            vertical: _vertical,
+          ),
+        );
+        final tabButtons = [
+          for (final tab in _OverlayTab.values)
+            _OverlayIconBarButton(
+              tab: tab,
+              selected: selectedTab == tab,
+              buttonColor: buttonColor,
+              buttonTextColor: buttonTextColor,
+              metrics: metrics,
+              onPressed: () => onTabSelected(tab),
             ),
-            minimizeButton,
-            stopButton,
-          ],
-        ),
+        ];
+        final minimizeButton = _OverlayControlActionButton(
+          tooltip: 'Minimize VanaDeck',
+          icon: Icons.minimize,
+          buttonTextColor: buttonTextColor,
+          metrics: metrics,
+          onPressed: onMinimize,
+        );
+        final stopButton = _OverlayControlActionButton(
+          tooltip: 'Stop overlay mode',
+          icon: Icons.close_fullscreen,
+          buttonTextColor: buttonTextColor,
+          metrics: metrics,
+          onPressed: onStop,
+        );
+
+        if (_vertical) {
+          return Container(
+            width: 40,
+            decoration: barDecoration,
+            padding: metrics.padding,
+            child: Column(
+              children: [
+                if (metrics.showDragHandle) ...[
+                  Icon(
+                    Icons.drag_indicator,
+                    size: metrics.dragIconSize,
+                    color: buttonTextColor,
+                  ),
+                  SizedBox(height: metrics.dragGap),
+                ],
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: tabButtons,
+                  ),
+                ),
+                minimizeButton,
+                stopButton,
+              ],
+            ),
+          );
+        }
+
+        return Container(
+          height: 40,
+          decoration: barDecoration,
+          padding: metrics.padding,
+          child: Row(
+            children: [
+              if (metrics.showDragHandle) ...[
+                Icon(
+                  Icons.drag_indicator,
+                  size: metrics.dragIconSize,
+                  color: buttonTextColor,
+                ),
+                SizedBox(width: metrics.dragGap),
+              ],
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: tabButtons,
+                ),
+              ),
+              minimizeButton,
+              stopButton,
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _OverlayControlBarMetrics {
+  const _OverlayControlBarMetrics({
+    required this.padding,
+    required this.buttonSize,
+    required this.navButtonOuterPadding,
+    required this.navIconSize,
+    required this.actionIconSize,
+    required this.dragIconSize,
+    required this.dragGap,
+    required this.showDragHandle,
+    required this.borderRadius,
+  });
+
+  final EdgeInsets padding;
+  final double buttonSize;
+  final double navButtonOuterPadding;
+  final double navIconSize;
+  final double actionIconSize;
+  final double dragIconSize;
+  final double dragGap;
+  final bool showDragHandle;
+  final double borderRadius;
+
+  static _OverlayControlBarMetrics forConstraints(
+    BoxConstraints constraints, {
+    required bool vertical,
+  }) {
+    final extent = vertical ? constraints.maxHeight : constraints.maxWidth;
+    if (extent >= (vertical ? 184 : 195)) {
+      return _OverlayControlBarMetrics(
+        padding: vertical
+            ? const EdgeInsets.symmetric(vertical: 5, horizontal: 4)
+            : const EdgeInsets.only(left: 7, right: 4),
+        buttonSize: 30,
+        navButtonOuterPadding: 1,
+        navIconSize: 17,
+        actionIconSize: 17,
+        dragIconSize: 18,
+        dragGap: vertical ? 0 : 10,
+        showDragHandle: true,
+        borderRadius: 6,
       );
     }
 
-    return Container(
-      height: 40,
-      decoration: barDecoration,
-      padding: const EdgeInsets.only(left: 7, right: 4),
-      child: Row(
-        children: [
-          Icon(Icons.drag_indicator, size: 18, color: buttonTextColor),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: tabButtons,
-            ),
-          ),
-          minimizeButton,
-          stopButton,
-        ],
+    if (extent >= 150) {
+      return _OverlayControlBarMetrics(
+        padding: vertical
+            ? const EdgeInsets.symmetric(vertical: 4, horizontal: 4)
+            : const EdgeInsets.only(left: 4, right: 3),
+        buttonSize: 24,
+        navButtonOuterPadding: 1,
+        navIconSize: 14,
+        actionIconSize: 14,
+        dragIconSize: 14,
+        dragGap: vertical ? 2 : 4,
+        showDragHandle: true,
+        borderRadius: 5,
+      );
+    }
+
+    final padding = vertical
+        ? const EdgeInsets.symmetric(vertical: 3, horizontal: 3)
+        : const EdgeInsets.only(left: 3, right: 2);
+    final paddingMainAxis = vertical ? padding.vertical : padding.horizontal;
+    final navButtonOuterPadding = extent < 112 ? 0.0 : 0.5;
+    final availableButtonSize =
+        (extent - paddingMainAxis - (navButtonOuterPadding * 2 * 3)) / 5;
+    final buttonSize = availableButtonSize.clamp(14.0, 22.0).toDouble();
+    final iconSize = (buttonSize - 9).clamp(10.0, 13.0).toDouble();
+
+    return _OverlayControlBarMetrics(
+      padding: padding,
+      buttonSize: buttonSize,
+      navButtonOuterPadding: navButtonOuterPadding,
+      navIconSize: iconSize,
+      actionIconSize: iconSize,
+      dragIconSize: 0,
+      dragGap: 0,
+      showDragHandle: false,
+      borderRadius: 5,
+    );
+  }
+}
+
+class _OverlayControlActionButton extends StatelessWidget {
+  const _OverlayControlActionButton({
+    required this.tooltip,
+    required this.icon,
+    required this.buttonTextColor,
+    required this.metrics,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final Color buttonTextColor;
+  final _OverlayControlBarMetrics metrics;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(icon, size: metrics.actionIconSize, color: buttonTextColor),
+      style: IconButton.styleFrom(
+        minimumSize: Size.square(metrics.buttonSize),
+        fixedSize: Size.square(metrics.buttonSize),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }
@@ -754,6 +883,7 @@ class _OverlayIconBarButton extends StatelessWidget {
     required this.selected,
     required this.buttonColor,
     required this.buttonTextColor,
+    required this.metrics,
     required this.onPressed,
   });
 
@@ -761,16 +891,17 @@ class _OverlayIconBarButton extends StatelessWidget {
   final bool selected;
   final Color buttonColor;
   final Color buttonTextColor;
+  final _OverlayControlBarMetrics metrics;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(1),
+      padding: EdgeInsets.all(metrics.navButtonOuterPadding),
       child: IconButton(
         tooltip: tab.label,
         onPressed: onPressed,
-        icon: Icon(tab.icon, size: 17),
+        icon: Icon(tab.icon, size: metrics.navIconSize),
         style: IconButton.styleFrom(
           foregroundColor: buttonTextColor.withValues(
             alpha: selected ? 1 : 0.78,
@@ -778,11 +909,13 @@ class _OverlayIconBarButton extends StatelessWidget {
           backgroundColor: selected
               ? buttonColor.withValues(alpha: 0.70)
               : Colors.white.withValues(alpha: 0.04),
-          minimumSize: const Size.square(30),
-          fixedSize: const Size.square(30),
+          minimumSize: Size.square(metrics.buttonSize),
+          fixedSize: Size.square(metrics.buttonSize),
           padding: EdgeInsets.zero,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(metrics.borderRadius),
+          ),
         ),
       ),
     );
@@ -805,26 +938,40 @@ class _OverlayWaitingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const CircularProgressIndicator(strokeWidth: 2),
-        const SizedBox(height: 14),
-        Text(
-          'Waiting for addon',
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Keep VanaDeck loaded in Ashita.',
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact =
+            math.min(constraints.maxWidth, constraints.maxHeight) < 145;
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox.square(
+              dimension: compact ? 22 : 36,
+              child: const CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(height: compact ? 8 : 14),
+            Text(
+              'Waiting for addon',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontSize: compact ? 11 : null,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (!compact) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Keep VanaDeck loaded in Ashita.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 }
@@ -956,26 +1103,36 @@ class _OverlayMacroTabState extends State<_OverlayMacroTab> {
         }
         unawaited(widget.onMacroInput(velocity < 0 ? 'page_up' : 'page_down'));
       },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _OverlayMacroHeader(status: widget.status, modifier: widget.modifier),
-          const SizedBox(height: 6),
-          Expanded(
-            child: _OverlayMacroGrid(
-              status: widget.status,
-              modifier: widget.modifier,
-              glowingMacroKey: _glowingMacroKey,
-              glowPulseId: _glowPulseId,
-              glowColor: widget.macroCastFeedbackColor,
-              buttonColor: widget.buttonColor,
-              buttonTextColor: widget.buttonTextColor,
-              onMacroPressed: (context, slot, needsTarget) {
-                return _handleMacroPressed(context, slot, needsTarget);
-              },
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact =
+              math.min(constraints.maxWidth, constraints.maxHeight) < 160;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _OverlayMacroHeader(
+                status: widget.status,
+                modifier: widget.modifier,
+                compact: compact,
+              ),
+              SizedBox(height: compact ? 3 : 6),
+              Expanded(
+                child: _OverlayMacroGrid(
+                  status: widget.status,
+                  modifier: widget.modifier,
+                  glowingMacroKey: _glowingMacroKey,
+                  glowPulseId: _glowPulseId,
+                  glowColor: widget.macroCastFeedbackColor,
+                  buttonColor: widget.buttonColor,
+                  buttonTextColor: widget.buttonTextColor,
+                  onMacroPressed: (context, slot, needsTarget) {
+                    return _handleMacroPressed(context, slot, needsTarget);
+                  },
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1102,17 +1259,22 @@ class _OverlayMacroTabState extends State<_OverlayMacroTab> {
 }
 
 class _OverlayMacroHeader extends StatelessWidget {
-  const _OverlayMacroHeader({required this.status, required this.modifier});
+  const _OverlayMacroHeader({
+    required this.status,
+    required this.modifier,
+    required this.compact,
+  });
 
   final PlayerStatus status;
   final _OverlayMacroModifier modifier;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     return Container(
-      height: 22,
-      padding: const EdgeInsets.symmetric(horizontal: 7),
+      height: compact ? 18 : 22,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 5 : 7),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(5),
@@ -1123,7 +1285,7 @@ class _OverlayMacroHeader extends StatelessWidget {
           Text(
             'Set ${status.activeMacroBook}-${status.activeMacroSet}',
             style: textTheme.labelSmall?.copyWith(
-              fontSize: 10,
+              fontSize: compact ? 9 : 10,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -1131,7 +1293,7 @@ class _OverlayMacroHeader extends StatelessWidget {
           Text(
             modifier.label,
             style: textTheme.labelSmall?.copyWith(
-              fontSize: 10,
+              fontSize: compact ? 9 : 10,
               color: Theme.of(context).colorScheme.primary,
               fontWeight: FontWeight.w800,
             ),
@@ -1593,6 +1755,9 @@ class _OverlayMapMarkers extends StatelessWidget {
     return Positioned.fill(
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final playerMarkerSize = _OverlayPlayerMarker.sizeForMapSize(
+            math.min(constraints.maxWidth, constraints.maxHeight),
+          );
           return Stack(
             children: [
               for (final marker in markers)
@@ -1618,7 +1783,10 @@ class _OverlayMapMarkers extends StatelessWidget {
                   0.0,
                   constraints.maxHeight,
                 ),
-                child: _OverlayPlayerMarker(heading: player.heading),
+                child: _OverlayPlayerMarker(
+                  heading: player.heading,
+                  size: playerMarkerSize,
+                ),
               ),
             ],
           );
@@ -1684,18 +1852,27 @@ class _OverlayMapMarker extends StatelessWidget {
 }
 
 class _OverlayPlayerMarker extends StatelessWidget {
-  const _OverlayPlayerMarker({required this.heading});
+  const _OverlayPlayerMarker({required this.heading, required this.size});
 
   final double? heading;
+  final double size;
+
+  static double sizeForMapSize(double mapSize) {
+    return (mapSize * 0.045).clamp(5.0, 9.0).toDouble();
+  }
 
   @override
   Widget build(BuildContext context) {
     final angle = (heading ?? 0) + 1.5708;
     return Transform.translate(
-      offset: const Offset(-6, -6),
+      offset: Offset(-size / 2, -size / 2),
       child: Transform.rotate(
         angle: angle,
-        child: const Icon(Icons.navigation, color: Color(0xFFFF3333), size: 12),
+        child: Icon(
+          Icons.navigation,
+          color: const Color(0xFFFF3333),
+          size: size,
+        ),
       ),
     );
   }
@@ -1900,7 +2077,9 @@ class _OverlayMacroGrid extends StatelessWidget {
       builder: (context, constraints) {
         const columns = 3;
         const rows = 4;
-        const gap = 5.0;
+        final compact =
+            math.min(constraints.maxWidth, constraints.maxHeight) < 120;
+        final gap = compact ? 3.0 : 5.0;
         final cellWidth =
             (constraints.maxWidth - (columns - 1) * gap) / columns;
         final cellHeight = (constraints.maxHeight - (rows - 1) * gap) / rows;
@@ -2001,95 +2180,122 @@ class _OverlayMacroButton extends StatelessWidget {
     final title = name.trim();
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        TextButton(
-          onPressed: onPressed,
-          style: ButtonStyle(
-            padding: const WidgetStatePropertyAll(
-              EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-            ),
-            minimumSize: const WidgetStatePropertyAll(Size.zero),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            foregroundColor: WidgetStatePropertyAll(buttonTextColor),
-            backgroundColor: WidgetStateProperty.resolveWith((states) {
-              final alpha = states.contains(WidgetState.pressed) ? 0.46 : 0.34;
-              return Color.alphaBlend(
-                buttonColor.withValues(alpha: alpha),
-                colorScheme.surfaceContainerHighest.withValues(alpha: 0.52),
-              );
-            }),
-            side: WidgetStatePropertyAll(
-              BorderSide(color: Colors.white.withValues(alpha: 0.16)),
-            ),
-            shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-            ),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Center(
-                  child: Text(
-                    title.isEmpty ? shortcut : title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: buttonTextColor,
-                      fontWeight: FontWeight.w800,
-                      height: 1.0,
-                    ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxHeight < 36 || constraints.maxWidth < 54;
+        final dense = constraints.maxHeight < 28 || constraints.maxWidth < 44;
+        final showFooter =
+            (title.isNotEmpty || needsTarget) &&
+            constraints.maxHeight >= (compact ? 30 : 38) &&
+            constraints.maxWidth >= 44;
+        final titleFontSize = dense
+            ? 9.0
+            : compact
+            ? 10.0
+            : null;
+        final footerHeight = compact ? 10.0 : 13.0;
+        final targetIconSize = compact ? 9.0 : 11.0;
+        final padding = dense
+            ? const EdgeInsets.symmetric(horizontal: 2, vertical: 1)
+            : compact
+            ? const EdgeInsets.symmetric(horizontal: 3, vertical: 2)
+            : const EdgeInsets.symmetric(horizontal: 4, vertical: 3);
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            TextButton(
+              onPressed: onPressed,
+              style: ButtonStyle(
+                padding: WidgetStatePropertyAll(padding),
+                minimumSize: const WidgetStatePropertyAll(Size.zero),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                foregroundColor: WidgetStatePropertyAll(buttonTextColor),
+                backgroundColor: WidgetStateProperty.resolveWith((states) {
+                  final alpha = states.contains(WidgetState.pressed)
+                      ? 0.46
+                      : 0.34;
+                  return Color.alphaBlend(
+                    buttonColor.withValues(alpha: alpha),
+                    colorScheme.surfaceContainerHighest.withValues(alpha: 0.52),
+                  );
+                }),
+                side: WidgetStatePropertyAll(
+                  BorderSide(color: Colors.white.withValues(alpha: 0.16)),
+                ),
+                shape: WidgetStatePropertyAll(
+                  RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(compact ? 5 : 6),
                   ),
                 ),
               ),
-              if (title.isNotEmpty || needsTarget)
-                SizedBox(
-                  height: 13,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (title.isNotEmpty)
-                        Flexible(
-                          child: Text(
-                            shortcut,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  fontSize: 9,
-                                  color: buttonTextColor.withValues(
-                                    alpha: 0.78,
-                                  ),
-                                  fontWeight: FontWeight.w700,
-                                  height: 1,
-                                ),
-                          ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        title.isEmpty ? shortcut : title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: buttonTextColor,
+                          fontSize: titleFontSize,
+                          fontWeight: FontWeight.w800,
+                          height: 1.0,
                         ),
-                      if (needsTarget) ...[
-                        if (title.isNotEmpty) const SizedBox(width: 3),
-                        Icon(
-                          Icons.group,
-                          size: 11,
-                          color: Colors.lightBlueAccent.shade400,
-                        ),
-                      ],
-                    ],
+                      ),
+                    ),
                   ),
-                ),
-            ],
-          ),
-        ),
-        if (glowing)
-          _OverlayMacroEdgeGlowFeedback(
-            key: ValueKey(glowPulseId),
-            color: glowColor,
-            duration: _OverlayMacroTabState._feedbackDuration,
-          ),
-      ],
+                  if (showFooter)
+                    SizedBox(
+                      height: footerHeight,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (title.isNotEmpty)
+                            Flexible(
+                              child: Text(
+                                shortcut,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      fontSize: compact ? 8 : 9,
+                                      color: buttonTextColor.withValues(
+                                        alpha: 0.78,
+                                      ),
+                                      fontWeight: FontWeight.w700,
+                                      height: 1,
+                                    ),
+                              ),
+                            ),
+                          if (needsTarget) ...[
+                            if (title.isNotEmpty)
+                              SizedBox(width: compact ? 2 : 3),
+                            Icon(
+                              Icons.group,
+                              size: targetIconSize,
+                              color: Colors.lightBlueAccent.shade400,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (glowing)
+              _OverlayMacroEdgeGlowFeedback(
+                key: ValueKey(glowPulseId),
+                color: glowColor,
+                duration: _OverlayMacroTabState._feedbackDuration,
+              ),
+          ],
+        );
+      },
     );
   }
 }

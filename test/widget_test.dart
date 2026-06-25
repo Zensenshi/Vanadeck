@@ -4,11 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vanadeck/main.dart';
 import 'package:vanadeck/models/party_member.dart';
 import 'package:vanadeck/models/player_status.dart';
+import 'package:vanadeck/overlay_main.dart' as overlay;
 import 'package:vanadeck/screens/chat_screen.dart';
 import 'package:vanadeck/screens/macro_screen.dart';
 import 'package:vanadeck/screens/settings_screen.dart';
 import 'package:vanadeck/screens/status_screen.dart';
 import 'package:vanadeck/services/app_settings_controller.dart';
+import 'package:vanadeck/services/game_status_service.dart';
 
 void main() {
   testWidgets('shows the primary navigation tabs', (tester) async {
@@ -27,6 +29,21 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(const VanaDeckApp());
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('overlay controls fit on compact handheld surfaces', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(120, 160));
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+      await GameStatusService.stopListening();
+    });
+
+    await tester.pumpWidget(const overlay.VanaDeckOverlayApp());
     await tester.pump();
 
     expect(tester.takeException(), isNull);
