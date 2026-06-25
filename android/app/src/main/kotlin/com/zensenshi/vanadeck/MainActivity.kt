@@ -1,4 +1,4 @@
-package com.example.vanadeck
+package com.zensenshi.vanadeck
 
 import android.app.ActivityOptions
 import android.app.Activity

@@ -7,8 +7,8 @@ This project includes the original VanaDeck addon source, but does not include F
 ## Features
 
 - Live player and party status from the included Ashita v4 addon.
-- Buff and debuff display with optional local status icon resources.
-- Mini-map display using user-selected Mappy map folders.
+- Buff and debuff display with optional user-provided XiView-style status icon resources.
+- Mini-map display using user-provided Mappy map folders.
 - Macro slot display with companion controls for in-game macro pages.
 - Chat composer and chat log view.
 - Theme color, OLED black mode, background image, and chat typography settings.
@@ -41,10 +41,10 @@ The current bridge uses `127.0.0.1:8080`: status updates are versioned VanaDeck 
 
 ## Optional Resources
 
-VanaDeck does not bundle maps, status icons, DAT files, or extracted game assets. You can point the app at local resources you provide:
+VanaDeck does not bundle maps, status icons, DAT files, or extracted game assets. It supports user-provided Mappy and XiView-style resources through app settings:
 
-- Mappy maps can be loaded from a folder containing `map.ini` and map images. The maps used while developing VanaDeck came from [KenshiDRK's Mappy version](https://github.com/KenshiDRK/mappy--Kenshi-Version).
-- Status icons can be loaded from a user-selected resource folder. Name icon PNGs by status ID, for example `33.png` or `40.png`. The icons used while developing VanaDeck came from [KenshiDRK's XiView project](https://github.com/KenshiDRK/XiView).
+- User-provided Mappy maps can be loaded from a folder containing `map.ini` and map images. Development testing used [KenshiDRK's Mappy version](https://github.com/KenshiDRK/mappy--Kenshi-Version).
+- User-provided XiView-style status icons can be loaded from a local resource folder. Name icon PNGs by status ID, for example `33.png` or `40.png`. Development testing used [KenshiDRK's XiView project](https://github.com/KenshiDRK/XiView).
 - Background images can be selected through the app settings.
 
 Follow each resource project's license and installation instructions. Do not commit game files, DAT files, map packs, icon packs, third-party binaries, or private local resource folders to this repository.

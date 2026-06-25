@@ -649,7 +649,7 @@ class _AboutSetting extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Mappy map support is intended for user-selected local map folders. Development references included Brehanin\'s Map Pack, formerly Sean\'s Map Pack, and community map.ini work from JP, NA, EU, and Windower contributors.',
+                    'Mappy map support is intended for user-provided local map folders. Development references included Brehanin\'s Map Pack, formerly Sean\'s Map Pack, and community map.ini work from JP, NA, EU, and Windower contributors.',
                   ),
                   const SizedBox(height: 16),
                   Text(

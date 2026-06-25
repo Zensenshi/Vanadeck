@@ -6,15 +6,15 @@ on:
       tag:
         description: Release tag to publish.
         required: true
-        default: v0.1.0
+        default: v0.3.0
       build_name:
         description: Android versionName.
         required: true
-        default: 0.1.0
+        default: 0.3.0
       build_number:
         description: Android versionCode.
         required: true
-        default: "1"
+        default: "4"
       publish_release:
         description: Attach the APK to a GitHub Release.
         type: boolean
@@ -55,9 +55,9 @@ jobs:
             build_number="${GITHUB_RUN_NUMBER}"
             publish_release="true"
           else
-            tag="v0.1.0"
-            build_name="0.1.0"
-            build_number="1"
+            tag="v0.3.0"
+            build_name="0.3.0"
+            build_number="4"
             publish_release="true"
           fi
 
@@ -116,7 +116,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: VanaDeck ${{ steps.meta.outputs.tag }}
           body: |
-            First Android release build for VanaDeck.
+            VanaDeck Android release build.
 
             This APK is suitable for direct install/testing. Configure private release signing before publishing to an app store.
           files: dist/${{ steps.meta.outputs.apk_name }}

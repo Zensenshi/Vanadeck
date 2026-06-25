@@ -1,4 +1,4 @@
-package com.example.vanadeck
+package com.zensenshi.vanadeck
 
 import android.app.Service
 import android.content.Context
@@ -29,12 +29,12 @@ import kotlin.math.roundToInt
 
 class VanaDeckOverlayService : Service() {
   companion object {
-    const val ACTION_SHOW = "com.example.vanadeck.overlay.SHOW"
-    const val ACTION_STOP = "com.example.vanadeck.overlay.STOP"
-    const val ACTION_UPDATE_SCALE = "com.example.vanadeck.overlay.UPDATE_SCALE"
-    const val ACTION_UPDATE_APPEARANCE = "com.example.vanadeck.overlay.UPDATE_APPEARANCE"
-    const val ACTION_UPDATE_TAB_POSITION = "com.example.vanadeck.overlay.UPDATE_TAB_POSITION"
-    const val ACTION_UPDATE_OVERLAY_THEME = "com.example.vanadeck.overlay.UPDATE_OVERLAY_THEME"
+    const val ACTION_SHOW = "com.zensenshi.vanadeck.overlay.SHOW"
+    const val ACTION_STOP = "com.zensenshi.vanadeck.overlay.STOP"
+    const val ACTION_UPDATE_SCALE = "com.zensenshi.vanadeck.overlay.UPDATE_SCALE"
+    const val ACTION_UPDATE_APPEARANCE = "com.zensenshi.vanadeck.overlay.UPDATE_APPEARANCE"
+    const val ACTION_UPDATE_TAB_POSITION = "com.zensenshi.vanadeck.overlay.UPDATE_TAB_POSITION"
+    const val ACTION_UPDATE_OVERLAY_THEME = "com.zensenshi.vanadeck.overlay.UPDATE_OVERLAY_THEME"
     const val EXTRA_SCALE = "scale"
     const val EXTRA_APPEARANCE = "appearance"
     const val EXTRA_TAB_POSITION = "tab_position"

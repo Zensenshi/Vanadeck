@@ -2,7 +2,7 @@
 
 Before publishing builds:
 
-- Replace the default Android application ID with an identifier you control before distributing builds.
+- Confirm the Android application ID is an identifier you control and keep it stable after release so app updates install correctly.
 - Configure private release signing outside the repository; do not commit keystores, provisioning profiles, passwords, or signing property files.
 - Re-run `flutter analyze`, `flutter test`, and an Android debug or release build before tagging a release.
 - Syntax-check the addon with LuaJIT when available, for example `luajit -e 'assert(loadfile("vanadeck/vanadeck.lua"))'`.
@@ -16,10 +16,10 @@ To publish the first GitHub release build:
 
 1. Open the repository on GitHub.
 2. Go to Actions -> Android release build -> Run workflow.
-3. Keep the defaults for the first build:
-   - `tag`: `v0.1.0`
-   - `build_name`: `0.1.0`
-   - `build_number`: `1`
+3. Keep the defaults for the current release build:
+   - `tag`: `v0.3.0`
+   - `build_name`: `0.3.0`
+   - `build_number`: `4`
    - `publish_release`: enabled
 4. Download the APK from the workflow artifact or from the generated GitHub Release.
 

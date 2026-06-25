@@ -24,7 +24,7 @@ Flutter applications can display full package license text through Flutter's bui
 
 ## Mappy Maps and Community Map Packs
 
-The app supports user-selected Mappy map folders. Local development resources used maps from KenshiDRK's Mappy version.
+The app supports user-provided Mappy map folders. Local development testing used maps from KenshiDRK's Mappy version.
 
 - Project: KenshiDRK/mappy--Kenshi-Version
 - Website: https://github.com/KenshiDRK/mappy--Kenshi-Version
@@ -35,7 +35,7 @@ Because redistribution rights for map packs and map images may vary or be unclea
 
 ## XiView Icons
 
-The app supports user-selected status icon PNG folders. Local development resources used icons from KenshiDRK's XiView project.
+The app supports user-provided XiView-style status icon PNG folders. Local development testing used icons from KenshiDRK's XiView project.
 
 - Project: KenshiDRK/XiView
 - Website: https://github.com/KenshiDRK/XiView

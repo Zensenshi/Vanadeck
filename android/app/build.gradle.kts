@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.vanadeck"
+    namespace = "com.zensenshi.vanadeck"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,9 +15,8 @@ android {
     }
 
     defaultConfig {
-        // Change this before distributing through an app store.
         // Keep the value stable after release so app updates install correctly.
-        applicationId = "com.example.vanadeck"
+        applicationId = "com.zensenshi.vanadeck"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
