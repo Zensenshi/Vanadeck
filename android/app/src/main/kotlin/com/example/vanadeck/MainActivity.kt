@@ -16,6 +16,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
   private val CHANNEL = "vanadeck/dual_screen"
+  private val OVERLAY_CHANNEL = "vanadeck/overlay"
   private val CALIBRATION_CHANNEL = "vanadeck/calibration"
   private val MACROS_CHANNEL = "vanadeck/macros"
   private val MAPS_CHANNEL = "vanadeck/maps"
@@ -49,6 +50,37 @@ class MainActivity : FlutterActivity() {
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
       when (call.method) {
         "moveToOtherScreen" -> result.success(moveToOtherScreen())
+        else -> result.notImplemented()
+      }
+    }
+    MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OVERLAY_CHANNEL).setMethodCallHandler { call, result ->
+      when (call.method) {
+        "isSupported" -> result.success(isOverlaySupported())
+        "hasPermission" -> result.success(hasOverlayPermission())
+        "requestPermission" -> {
+          requestOverlayPermission()
+          result.success(null)
+        }
+        "isRunning" -> result.success(VanaDeckOverlayService.isRunning)
+        "lastError" -> result.success(VanaDeckOverlayService.lastError)
+        "start" -> result.success(startOverlay(call.arguments as? Map<*, *>))
+        "stop" -> result.success(stopOverlay())
+        "updateScale" -> {
+          updateOverlayScale(call.arguments as? Map<*, *>)
+          result.success(null)
+        }
+        "updateAppearance" -> {
+          updateOverlayAppearance(call.arguments as? Map<*, *>)
+          result.success(null)
+        }
+        "updateTabPosition" -> {
+          updateOverlayTabPosition(call.arguments as? Map<*, *>)
+          result.success(null)
+        }
+        "updateOverlayTheme" -> {
+          updateOverlayTheme(call.arguments as? Map<*, *>)
+          result.success(null)
+        }
         else -> result.notImplemented()
       }
     }
@@ -340,6 +372,151 @@ class MainActivity : FlutterActivity() {
     }
 
     return false
+  }
+
+  private fun isOverlaySupported(): Boolean {
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+  }
+
+  private fun hasOverlayPermission(): Boolean {
+    if (!isOverlaySupported()) {
+      return false
+    }
+    return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+  }
+
+  private fun requestOverlayPermission() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || hasOverlayPermission()) {
+      return
+    }
+
+    val intent = Intent(
+      Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+      Uri.parse("package:$packageName"),
+    )
+    startActivity(intent)
+  }
+
+  private fun startOverlay(arguments: Map<*, *>?): Boolean {
+    if (!hasOverlayPermission()) {
+      return false
+    }
+
+    val scale = (arguments?.get("scale") as? Number)?.toDouble()
+      ?: VanaDeckOverlayService.DEFAULT_SCALE
+    val appearance = arguments?.get("appearance") as? String
+      ?: VanaDeckOverlayService.DEFAULT_APPEARANCE
+    val tabPosition = arguments?.get("tabPosition") as? String
+      ?: VanaDeckOverlayService.DEFAULT_TAB_POSITION
+    val intent = Intent(this, VanaDeckOverlayService::class.java).apply {
+      action = VanaDeckOverlayService.ACTION_SHOW
+      putExtra(VanaDeckOverlayService.EXTRA_SCALE, scale)
+      putExtra(VanaDeckOverlayService.EXTRA_APPEARANCE, appearance)
+      putExtra(VanaDeckOverlayService.EXTRA_TAB_POSITION, tabPosition)
+      putExtra(VanaDeckOverlayService.EXTRA_DISPLAY_ID, currentDisplayId())
+    }
+    return try {
+      startService(intent)
+      true
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun stopOverlay(): Boolean {
+    val intent = Intent(this, VanaDeckOverlayService::class.java).apply {
+      action = VanaDeckOverlayService.ACTION_STOP
+    }
+    return try {
+      startService(intent)
+      true
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun updateOverlayScale(arguments: Map<*, *>?) {
+    if (!VanaDeckOverlayService.isRunning) {
+      return
+    }
+
+    val scale = (arguments?.get("scale") as? Number)?.toDouble()
+      ?: VanaDeckOverlayService.DEFAULT_SCALE
+    val intent = Intent(this, VanaDeckOverlayService::class.java).apply {
+      action = VanaDeckOverlayService.ACTION_UPDATE_SCALE
+      putExtra(VanaDeckOverlayService.EXTRA_SCALE, scale)
+    }
+    try {
+      startService(intent)
+    } catch (_: Exception) {
+    }
+  }
+
+  private fun updateOverlayAppearance(arguments: Map<*, *>?) {
+    if (!VanaDeckOverlayService.isRunning) {
+      return
+    }
+
+    val appearance = arguments?.get("appearance") as? String
+      ?: VanaDeckOverlayService.DEFAULT_APPEARANCE
+    val intent = Intent(this, VanaDeckOverlayService::class.java).apply {
+      action = VanaDeckOverlayService.ACTION_UPDATE_APPEARANCE
+      putExtra(VanaDeckOverlayService.EXTRA_APPEARANCE, appearance)
+    }
+    try {
+      startService(intent)
+    } catch (_: Exception) {
+    }
+  }
+
+  private fun updateOverlayTabPosition(arguments: Map<*, *>?) {
+    if (!VanaDeckOverlayService.isRunning) {
+      return
+    }
+
+    val tabPosition = arguments?.get("tabPosition") as? String
+      ?: VanaDeckOverlayService.DEFAULT_TAB_POSITION
+    val intent = Intent(this, VanaDeckOverlayService::class.java).apply {
+      action = VanaDeckOverlayService.ACTION_UPDATE_TAB_POSITION
+      putExtra(VanaDeckOverlayService.EXTRA_TAB_POSITION, tabPosition)
+    }
+    try {
+      startService(intent)
+    } catch (_: Exception) {
+    }
+  }
+
+  private fun updateOverlayTheme(arguments: Map<*, *>?) {
+    if (!VanaDeckOverlayService.isRunning) {
+      return
+    }
+
+    val intent = Intent(this, VanaDeckOverlayService::class.java).apply {
+      action = VanaDeckOverlayService.ACTION_UPDATE_OVERLAY_THEME
+      (arguments?.get("iconBarColorStyle") as? String)?.let {
+        putExtra(VanaDeckOverlayService.EXTRA_ICON_BAR_COLOR_STYLE, it)
+      }
+      (arguments?.get("iconBarStartColor") as? Number)?.toInt()?.let {
+        putExtra(VanaDeckOverlayService.EXTRA_ICON_BAR_START_COLOR, it)
+      }
+      (arguments?.get("iconBarEndColor") as? Number)?.toInt()?.let {
+        putExtra(VanaDeckOverlayService.EXTRA_ICON_BAR_END_COLOR, it)
+      }
+      (arguments?.get("buttonColor") as? Number)?.toInt()?.let {
+        putExtra(VanaDeckOverlayService.EXTRA_BUTTON_COLOR, it)
+      }
+      (arguments?.get("buttonTextColor") as? Number)?.toInt()?.let {
+        putExtra(VanaDeckOverlayService.EXTRA_BUTTON_TEXT_COLOR, it)
+      }
+    }
+    try {
+      startService(intent)
+    } catch (_: Exception) {
+    }
+  }
+
+  private fun currentDisplayId(): Int {
+    return display?.displayId ?: Display.DEFAULT_DISPLAY
   }
 
   private fun pickMapsFolder(result: MethodChannel.Result) {

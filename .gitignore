@@ -64,3 +64,4 @@ app.*.map.json
 *.dll
 *.exe
 *.luac
+.git.worktree-pointer.bak

@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 
+import 'overlay_main.dart' as overlay;
 import 'screens/home_screen.dart';
 import 'services/app_settings_controller.dart';
 
 void main() {
   runApp(const VanaDeckApp());
+}
+
+@pragma('vm:entry-point')
+void overlayMain() {
+  overlay.overlayMain();
 }
 
 class VanaDeckApp extends StatefulWidget {
@@ -61,10 +67,7 @@ class _VanaDeckAppState extends State<VanaDeckApp> {
     final hasBackgroundImage = _settings.backgroundImageBytes != null;
     final colorScheme = _buildColorScheme(brightness);
     final oledBlack = brightness == Brightness.dark && _isOledBlack;
-    final usesAmbientBackground =
-        hasBackgroundImage ||
-        (!oledBlack &&
-            _settings.backgroundGradientScheme != AppGradientScheme.none);
+    final usesAmbientBackground = hasBackgroundImage || !oledBlack;
 
     return ThemeData(
       colorScheme: colorScheme,
@@ -118,7 +121,7 @@ class _VanaDeckAppState extends State<VanaDeckApp> {
     }
 
     final selectedColor = _settings.seedColor;
-    final selectedOnColor = _onColor(selectedColor);
+    final selectedOnColor = _settings.buttonTextColor;
     final baseScheme = ColorScheme.fromSeed(
       seedColor: _settings.seedColor,
       brightness: brightness,
@@ -145,19 +148,10 @@ class _VanaDeckAppState extends State<VanaDeckApp> {
     if (dark && _isOledBlack) {
       return Colors.black;
     }
-    return Color.alphaBlend(
-      _settings.seedColor.withValues(alpha: dark ? 0.08 : 0.05),
-      dark ? const Color(0xFF111816) : const Color(0xFFF7FAF8),
-    );
+    return dark ? const Color(0xFF111816) : const Color(0xFFF7FAF8);
   }
 
   bool get _isOledBlack => _settings.isOledBlack;
-
-  Color _onColor(Color color) {
-    return ThemeData.estimateBrightnessForColor(color) == Brightness.dark
-        ? Colors.white
-        : Colors.black;
-  }
 }
 
 class _AppBackground extends StatelessWidget {
@@ -171,25 +165,26 @@ class _AppBackground extends StatelessWidget {
     final brightness = Theme.of(context).brightness;
     final dark = brightness == Brightness.dark;
     final oledBlack = dark && settings.isOledBlack;
-    final fallbackColor = Color.alphaBlend(
-      settings.seedColor.withValues(
-        alpha: oledBlack ? 0 : (dark ? 0.08 : 0.05),
-      ),
-      oledBlack
-          ? Colors.black
-          : dark
-          ? const Color(0xFF111816)
-          : const Color(0xFFF7FAF8),
-    );
+    final fallbackColor = oledBlack
+        ? Colors.black
+        : dark
+        ? const Color(0xFF111816)
+        : const Color(0xFFF7FAF8);
     final backgroundBytes = settings.backgroundImageBytes;
+    final backgroundColor = settings.surfaceGradientColors.appColor(
+      style: settings.backgroundColorStyle,
+      brightness: brightness,
+      fallbackColor: fallbackColor,
+      isOledBlack: oledBlack,
+    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: fallbackColor,
+        color: backgroundColor,
         gradient: backgroundBytes == null
-            ? settings.backgroundGradientScheme.gradient(
+            ? settings.surfaceGradientColors.appGradient(
+                style: settings.backgroundColorStyle,
                 brightness: brightness,
-                seedColor: settings.seedColor,
                 fallbackColor: fallbackColor,
                 isOledBlack: oledBlack,
               )

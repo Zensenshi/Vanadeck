@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../services/app_settings_controller.dart';
+import '../services/game_status_service.dart';
 import '../services/ime_input_service.dart';
 import '../services/map_service.dart';
+import '../services/overlay_mode_controller.dart';
+import '../services/overlay_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.settings});
@@ -16,8 +19,12 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen>
     with WidgetsBindingObserver {
   final _imeInputService = const ImeInputService();
+  final _overlayMode = const OverlayModeController();
+  final _overlayService = const OverlayService();
   String? _mapsFolderName;
   ImeInputStatus _imeStatus = const ImeInputStatus();
+  OverlayModeStatus _overlayStatus = OverlayModeStatus.unknown;
+  bool _overlayBusy = false;
   bool _selectingMapsFolder = false;
 
   @override
@@ -28,6 +35,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     _mapsFolderName = MapService.mapsFolderName;
     _loadMapsFolderName();
     _refreshKeyboardStatus();
+    _refreshOverlayStatus();
   }
 
   @override
@@ -47,6 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _refreshKeyboardStatus();
+      _refreshOverlayStatus();
     }
   }
 
@@ -113,6 +122,183 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
   }
 
+  Future<void> _refreshOverlayStatus() async {
+    final status = await _overlayMode.status();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _overlayStatus = status;
+    });
+
+    if (!status.running) {
+      GameStatusService.startDefaultListener();
+    }
+  }
+
+  Future<void> _requestOverlayPermission() async {
+    final status = await _overlayMode.requestPermission();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _overlayStatus = status;
+    });
+  }
+
+  Future<void> _startOverlay() async {
+    setState(() {
+      _overlayBusy = true;
+    });
+
+    try {
+      final result = await _overlayMode.start(widget.settings);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _overlayStatus = result.status;
+      });
+
+      final message = result.message;
+      if (message != null) {
+        _showOverlayMessage(message);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _overlayBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _stopOverlay() async {
+    setState(() {
+      _overlayBusy = true;
+    });
+    try {
+      final result = await _overlayMode.stop();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _overlayStatus = result.status;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _overlayBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _setOverlayScale(double scale) async {
+    await widget.settings.setOverlayScale(scale);
+    if (_overlayStatus.running) {
+      await _overlayService.updateScale(widget.settings.overlayScale);
+    }
+  }
+
+  Future<void> _setOverlayAppearance(OverlayAppearance appearance) async {
+    await widget.settings.setOverlayAppearance(appearance);
+    if (_overlayStatus.running) {
+      await _overlayService.updateAppearance(appearance);
+    }
+  }
+
+  Future<void> _setOverlayTabPosition(OverlayTabPosition position) async {
+    await widget.settings.setOverlayTabPosition(position);
+    if (_overlayStatus.running) {
+      await _overlayService.updateTabPosition(position);
+    }
+  }
+
+  Future<void> _setDarkMode() async {
+    await widget.settings.setOledBlack(false);
+    await widget.settings.setThemeMode(ThemeMode.dark);
+  }
+
+  Future<void> _setLightMode() async {
+    await widget.settings.setOledBlack(false);
+    await widget.settings.setThemeMode(ThemeMode.light);
+  }
+
+  Future<void> _setOledBlackMode() async {
+    await widget.settings.setThemeMode(ThemeMode.dark);
+    await widget.settings.setOledBlack(true);
+  }
+
+  Future<void> _setButtonColor(Color color) async {
+    await widget.settings.setSeedColor(color);
+    await _updateRunningOverlayTheme();
+  }
+
+  Future<void> _setButtonTextColor(Color color) async {
+    await widget.settings.setButtonTextColor(color);
+    await _updateRunningOverlayTheme();
+  }
+
+  Future<void> _setIconBarColorStyle(ColorFillStyle style) async {
+    await widget.settings.setIconBarColorStyle(style);
+    await _updateRunningOverlayTheme();
+  }
+
+  Future<void> _setIconBarStartColor(Color color) async {
+    await widget.settings.setIconBarStartColor(color);
+    await _updateRunningOverlayTheme();
+  }
+
+  Future<void> _setIconBarEndColor(Color color) async {
+    await widget.settings.setIconBarEndColor(color);
+    await _updateRunningOverlayTheme();
+  }
+
+  Future<void> _resetIconBarColors() async {
+    await widget.settings.resetIconBarColors();
+    await _updateRunningOverlayTheme();
+  }
+
+  Future<void> _setBackgroundColorStyle(ColorFillStyle style) async {
+    await widget.settings.setBackgroundColorStyle(style);
+  }
+
+  Future<void> _setSurfaceGradientStartColor(Color color) async {
+    await widget.settings.setSurfaceGradientStartColor(color);
+  }
+
+  Future<void> _setSurfaceGradientEndColor(Color color) async {
+    await widget.settings.setSurfaceGradientEndColor(color);
+  }
+
+  Future<void> _resetSurfaceGradientColors() async {
+    await widget.settings.resetSurfaceGradientColors();
+  }
+
+  Future<void> _updateRunningOverlayTheme() async {
+    if (_overlayStatus.running) {
+      await _overlayService.updateOverlayTheme(
+        iconBarColorStyle: widget.settings.iconBarColorStyle,
+        iconBarColors: widget.settings.iconBarColors,
+        buttonColor: widget.settings.buttonColor,
+        buttonTextColor: widget.settings.buttonTextColor,
+      );
+    }
+  }
+
+  void _showOverlayMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -156,7 +342,10 @@ class _SettingsScreenState extends State<SettingsScreen>
                   children: [
                     _ThemeModeSetting(
                       selectedMode: widget.settings.themeMode,
-                      onSelected: widget.settings.setThemeMode,
+                      isOledBlack: widget.settings.isOledBlack,
+                      onDarkSelected: _setDarkMode,
+                      onLightSelected: _setLightMode,
+                      onOledBlackSelected: _setOledBlackMode,
                     ),
                     const SizedBox(height: 16),
                     Divider(
@@ -164,11 +353,10 @@ class _SettingsScreenState extends State<SettingsScreen>
                     ),
                     const SizedBox(height: 12),
                     _ThemeColorSetting(
-                      title: 'App color',
-                      selectedColor: widget.settings.seedColor,
-                      onSelected: widget.settings.setSeedColor,
-                      showOledBlack: true,
-                      onReset: () => widget.settings.setSeedColor(
+                      title: 'Button color',
+                      selectedColor: widget.settings.buttonColor,
+                      onSelected: _setButtonColor,
+                      onReset: () => _setButtonColor(
                         AppSettingsController.defaultSeedColor,
                       ),
                     ),
@@ -178,14 +366,11 @@ class _SettingsScreenState extends State<SettingsScreen>
                     ),
                     const SizedBox(height: 12),
                     _ThemeColorSetting(
-                      title: 'Navigation color',
-                      selectedColor: widget.settings.navigationSeedColor,
-                      onSelected: widget.settings.setNavigationSeedColor,
-                      onReset: () => widget.settings.setNavigationSeedColor(
-                        AppSettingsController.defaultSeedColor,
-                      ),
-                      onMatchApp: () => widget.settings.setNavigationSeedColor(
-                        widget.settings.seedColor,
+                      title: 'Button text color',
+                      selectedColor: widget.settings.buttonTextColor,
+                      onSelected: _setButtonTextColor,
+                      onReset: () => _setButtonTextColor(
+                        AppSettingsController.defaultButtonTextColor,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -193,9 +378,30 @@ class _SettingsScreenState extends State<SettingsScreen>
                       color: Theme.of(context).colorScheme.outlineVariant,
                     ),
                     const SizedBox(height: 12),
-                    _GradientSchemeSetting(
-                      selectedScheme: widget.settings.backgroundGradientScheme,
-                      onSelected: widget.settings.setBackgroundGradientScheme,
+                    _ColorStyleSetting(
+                      title: 'Icon Bar color',
+                      style: widget.settings.iconBarColorStyle,
+                      colors: widget.settings.iconBarColors,
+                      onStyleChanged: _setIconBarColorStyle,
+                      onStartColorChanged: _setIconBarStartColor,
+                      onEndColorChanged: _setIconBarEndColor,
+                      onReset: _resetIconBarColors,
+                      onMatchButton: () =>
+                          _setIconBarStartColor(widget.settings.buttonColor),
+                    ),
+                    const SizedBox(height: 16),
+                    Divider(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    const SizedBox(height: 12),
+                    _ColorStyleSetting(
+                      title: 'Background color',
+                      style: widget.settings.backgroundColorStyle,
+                      colors: widget.settings.surfaceGradientColors,
+                      onStyleChanged: _setBackgroundColorStyle,
+                      onStartColorChanged: _setSurfaceGradientStartColor,
+                      onEndColorChanged: _setSurfaceGradientEndColor,
+                      onReset: _resetSurfaceGradientColors,
                     ),
                     const SizedBox(height: 16),
                     Divider(
@@ -261,6 +467,27 @@ class _SettingsScreenState extends State<SettingsScreen>
                   ],
                 ),
                 const SizedBox(height: 18),
+                _SettingsSection(
+                  title: 'Overlay Mode',
+                  children: [
+                    _OverlaySetting(
+                      supported: _overlayStatus.supported,
+                      permissionGranted: _overlayStatus.permissionGranted,
+                      running: _overlayStatus.running,
+                      busy: _overlayBusy,
+                      scale: widget.settings.overlayScale,
+                      appearance: widget.settings.overlayAppearance,
+                      tabPosition: widget.settings.overlayTabPosition,
+                      onRequestPermission: _requestOverlayPermission,
+                      onStart: _startOverlay,
+                      onStop: _stopOverlay,
+                      onScaleChanged: _setOverlayScale,
+                      onAppearanceChanged: _setOverlayAppearance,
+                      onTabPositionChanged: _setOverlayTabPosition,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
                 const _AboutSetting(),
               ],
             );
@@ -271,11 +498,30 @@ class _SettingsScreenState extends State<SettingsScreen>
   }
 }
 
-class _SettingsSection extends StatelessWidget {
+class _SettingsSection extends StatefulWidget {
   const _SettingsSection({required this.title, required this.children});
 
   final String title;
   final List<Widget> children;
+
+  @override
+  State<_SettingsSection> createState() => _SettingsSectionState();
+}
+
+class _SettingsSectionState extends State<_SettingsSection> {
+  late bool _expanded;
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = false;
+  }
+
+  void _toggleExpanded() {
+    setState(() {
+      _expanded = !_expanded;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -291,14 +537,30 @@ class _SettingsSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: _toggleExpanded,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 160),
+                      child: const Icon(Icons.keyboard_arrow_down),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            const SizedBox(height: 12),
-            ...children,
+            if (_expanded) ...[const SizedBox(height: 12), ...widget.children],
           ],
         ),
       ),
@@ -479,6 +741,150 @@ class _KeyboardSetupActions extends StatelessWidget {
   }
 }
 
+class _OverlaySetting extends StatelessWidget {
+  const _OverlaySetting({
+    required this.supported,
+    required this.permissionGranted,
+    required this.running,
+    required this.busy,
+    required this.scale,
+    required this.appearance,
+    required this.tabPosition,
+    required this.onRequestPermission,
+    required this.onStart,
+    required this.onStop,
+    required this.onScaleChanged,
+    required this.onAppearanceChanged,
+    required this.onTabPositionChanged,
+  });
+
+  final bool supported;
+  final bool permissionGranted;
+  final bool running;
+  final bool busy;
+  final double scale;
+  final OverlayAppearance appearance;
+  final OverlayTabPosition tabPosition;
+  final Future<void> Function() onRequestPermission;
+  final Future<void> Function() onStart;
+  final Future<void> Function() onStop;
+  final ValueChanged<double> onScaleChanged;
+  final ValueChanged<OverlayAppearance> onAppearanceChanged;
+  final ValueChanged<OverlayTabPosition> onTabPositionChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final valueLabel = '${(scale * 100).round()}%';
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Floating controls',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    supported
+                        ? running
+                              ? 'Overlay Mode is running'
+                              : permissionGranted
+                              ? 'Ready for a single display'
+                              : 'Android overlay permission required'
+                        : 'Overlay Mode is unavailable on this Android version',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            if (!permissionGranted && supported)
+              OutlinedButton.icon(
+                onPressed: busy ? null : onRequestPermission,
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('Allow'),
+              )
+            else
+              FilledButton.icon(
+                onPressed: !supported || busy
+                    ? null
+                    : running
+                    ? onStop
+                    : onStart,
+                icon: busy
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        running ? Icons.close_fullscreen : Icons.open_in_full,
+                      ),
+                label: Text(running ? 'Stop' : 'Start'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Text('Scale', style: Theme.of(context).textTheme.titleSmall),
+            const Spacer(),
+            Text(valueLabel, style: Theme.of(context).textTheme.labelLarge),
+          ],
+        ),
+        Slider(
+          value: scale,
+          min: AppSettingsService.minOverlayScale,
+          max: AppSettingsService.maxOverlayScale,
+          divisions:
+              ((AppSettingsService.maxOverlayScale -
+                          AppSettingsService.minOverlayScale) /
+                      0.05)
+                  .round(),
+          label: valueLabel,
+          onChanged: supported ? onScaleChanged : null,
+        ),
+        const SizedBox(height: 10),
+        Text('Theme', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        SegmentedButton<OverlayAppearance>(
+          segments: [
+            for (final option in OverlayAppearance.values)
+              ButtonSegment(value: option, label: Text(option.label)),
+          ],
+          selected: {appearance},
+          showSelectedIcon: false,
+          onSelectionChanged: supported
+              ? (selection) => onAppearanceChanged(selection.first)
+              : null,
+        ),
+        const SizedBox(height: 14),
+        Text('Icon Bar', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        SegmentedButton<OverlayTabPosition>(
+          segments: [
+            for (final option in OverlayTabPosition.values)
+              ButtonSegment(value: option, label: Text(option.label)),
+          ],
+          selected: {tabPosition},
+          showSelectedIcon: false,
+          onSelectionChanged: supported
+              ? (selection) => onTabPositionChanged(selection.first)
+              : null,
+        ),
+      ],
+    );
+  }
+}
+
 class _FolderSetting extends StatelessWidget {
   const _FolderSetting({
     required this.title,
@@ -532,41 +938,68 @@ class _FolderSetting extends StatelessWidget {
 class _ThemeModeSetting extends StatelessWidget {
   const _ThemeModeSetting({
     required this.selectedMode,
-    required this.onSelected,
+    required this.isOledBlack,
+    required this.onDarkSelected,
+    required this.onLightSelected,
+    required this.onOledBlackSelected,
   });
 
   final ThemeMode selectedMode;
-  final ValueChanged<ThemeMode> onSelected;
+  final bool isOledBlack;
+  final Future<void> Function() onDarkSelected;
+  final Future<void> Function() onLightSelected;
+  final Future<void> Function() onOledBlackSelected;
 
   @override
   Widget build(BuildContext context) {
+    final selected = isOledBlack
+        ? _AppearanceMode.oled
+        : selectedMode == ThemeMode.light
+        ? _AppearanceMode.light
+        : _AppearanceMode.dark;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Mode', style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 8),
-        SegmentedButton<ThemeMode>(
+        SegmentedButton<_AppearanceMode>(
           segments: const [
             ButtonSegment(
-              value: ThemeMode.dark,
+              value: _AppearanceMode.dark,
               icon: Icon(Icons.dark_mode_outlined),
               label: Text('Dark'),
             ),
             ButtonSegment(
-              value: ThemeMode.light,
+              value: _AppearanceMode.light,
               icon: Icon(Icons.light_mode_outlined),
               label: Text('Light'),
             ),
+            ButtonSegment(
+              value: _AppearanceMode.oled,
+              icon: Icon(Icons.contrast),
+              label: Text('OLED black'),
+            ),
           ],
-          selected: {
-            selectedMode == ThemeMode.light ? ThemeMode.light : ThemeMode.dark,
+          selected: {selected},
+          showSelectedIcon: false,
+          onSelectionChanged: (selection) {
+            switch (selection.first) {
+              case _AppearanceMode.dark:
+                onDarkSelected();
+              case _AppearanceMode.light:
+                onLightSelected();
+              case _AppearanceMode.oled:
+                onOledBlackSelected();
+            }
           },
-          onSelectionChanged: (selected) => onSelected(selected.first),
         ),
       ],
     );
   }
 }
+
+enum _AppearanceMode { dark, light, oled }
 
 class _MacroCastFeedbackStyleSetting extends StatelessWidget {
   const _MacroCastFeedbackStyleSetting({
@@ -609,41 +1042,121 @@ class _MacroCastFeedbackStyleSetting extends StatelessWidget {
   }
 }
 
-class _GradientSchemeSetting extends StatelessWidget {
-  const _GradientSchemeSetting({
-    required this.selectedScheme,
-    required this.onSelected,
+class _ColorStyleSetting extends StatelessWidget {
+  const _ColorStyleSetting({
+    required this.title,
+    required this.style,
+    required this.colors,
+    required this.onStyleChanged,
+    required this.onStartColorChanged,
+    required this.onEndColorChanged,
+    required this.onReset,
+    this.onMatchButton,
   });
 
-  final AppGradientScheme selectedScheme;
-  final ValueChanged<AppGradientScheme> onSelected;
+  final String title;
+  final ColorFillStyle style;
+  final SurfaceGradientColors colors;
+  final ValueChanged<ColorFillStyle> onStyleChanged;
+  final ValueChanged<Color> onStartColorChanged;
+  final ValueChanged<Color> onEndColorChanged;
+  final VoidCallback onReset;
+  final VoidCallback? onMatchButton;
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final gradient = style == ColorFillStyle.gradation
+        ? LinearGradient(colors: [colors.start, colors.end])
+        : null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Surface style', style: Theme.of(context).textTheme.titleSmall),
+        Text(title, style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 8),
-        DropdownButtonFormField<AppGradientScheme>(
-          initialValue: selectedScheme,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            isDense: true,
+        Container(
+          height: 38,
+          decoration: BoxDecoration(
+            color: colors.start,
+            gradient: gradient,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: colorScheme.outlineVariant),
           ),
-          items: [
-            for (final scheme in AppGradientScheme.values)
-              DropdownMenuItem(value: scheme, child: Text(scheme.label)),
+        ),
+        const SizedBox(height: 10),
+        SegmentedButton<ColorFillStyle>(
+          segments: [
+            for (final option in ColorFillStyle.values)
+              ButtonSegment(value: option, label: Text(option.label)),
           ],
-          onChanged: (value) {
-            if (value != null) {
-              onSelected(value);
-            }
-          },
+          selected: {style},
+          showSelectedIcon: false,
+          onSelectionChanged: (selection) => onStyleChanged(selection.first),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _GradientColorButton(
+              label: style == ColorFillStyle.solid ? 'Color' : 'Start color',
+              color: colors.start,
+              onSelected: onStartColorChanged,
+            ),
+            if (style == ColorFillStyle.gradation)
+              _GradientColorButton(
+                label: 'End color',
+                color: colors.end,
+                onSelected: onEndColorChanged,
+              ),
+            if (onMatchButton != null)
+              OutlinedButton.icon(
+                onPressed: onMatchButton,
+                icon: const Icon(Icons.format_paint_outlined),
+                label: const Text('Match button'),
+              ),
+            OutlinedButton.icon(
+              onPressed: onReset,
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Reset'),
+            ),
+          ],
         ),
       ],
     );
+  }
+}
+
+class _GradientColorButton extends StatelessWidget {
+  const _GradientColorButton({
+    required this.label,
+    required this.color,
+    required this.onSelected,
+  });
+
+  final String label;
+  final Color color;
+  final ValueChanged<Color> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: () => _showColorPicker(context),
+      icon: _ColorSwatch(color: color, size: 18),
+      label: Text(label),
+    );
+  }
+
+  Future<void> _showColorPicker(BuildContext context) async {
+    final picked = await showDialog<Color>(
+      context: context,
+      builder: (context) =>
+          _ColorPickerDialog(initialColor: color, title: 'Choose $label'),
+    );
+    if (picked != null) {
+      onSelected(picked);
+    }
   }
 }
 
@@ -652,17 +1165,13 @@ class _ThemeColorSetting extends StatelessWidget {
     required this.title,
     required this.selectedColor,
     required this.onSelected,
-    this.showOledBlack = false,
     this.onReset,
-    this.onMatchApp,
   });
 
   final String title;
   final Color selectedColor;
   final ValueChanged<Color> onSelected;
-  final bool showOledBlack;
   final VoidCallback? onReset;
-  final VoidCallback? onMatchApp;
 
   @override
   Widget build(BuildContext context) {
@@ -696,18 +1205,6 @@ class _ThemeColorSetting extends StatelessWidget {
               icon: const Icon(Icons.palette_outlined),
               label: const Text('Choose color'),
             ),
-            if (showOledBlack)
-              OutlinedButton.icon(
-                onPressed: () => onSelected(Colors.black),
-                icon: const Icon(Icons.contrast),
-                label: const Text('OLED black'),
-              ),
-            if (onMatchApp != null)
-              OutlinedButton.icon(
-                onPressed: onMatchApp,
-                icon: const Icon(Icons.format_paint_outlined),
-                label: const Text('Match app'),
-              ),
             if (onReset != null)
               OutlinedButton.icon(
                 onPressed: onReset,

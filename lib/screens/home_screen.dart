@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/player_status.dart';
 import '../services/app_settings_controller.dart';
 import '../services/game_status_service.dart';
+import '../services/overlay_mode_controller.dart';
 import 'chat_screen.dart';
 import 'macro_screen.dart';
 import 'map_screen.dart';
@@ -18,16 +19,83 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   late final GameStatusService _statusService;
   late final Stream<PlayerStatus> _statusStream;
+  final _overlayMode = const OverlayModeController();
+  OverlayModeStatus _overlayStatus = OverlayModeStatus.unknown;
+  bool _overlayBusy = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _statusService = const GameStatusService();
     _statusStream = _statusService.statusStream.asBroadcastStream();
+    _refreshOverlayStatus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshOverlayStatus();
+    }
+  }
+
+  Future<void> _refreshOverlayStatus() async {
+    final status = await _overlayMode.status();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _overlayStatus = status;
+    });
+  }
+
+  Future<void> _toggleOverlayMode() async {
+    if (_overlayBusy) {
+      return;
+    }
+
+    setState(() {
+      _overlayBusy = true;
+    });
+
+    try {
+      final result = await _overlayMode.toggle(widget.settings);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _overlayStatus = result.status;
+      });
+      final message = result.message;
+      if (message != null) {
+        _showOverlayMessage(message);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _overlayBusy = false;
+        });
+      }
+    }
+  }
+
+  void _showOverlayMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -60,7 +128,13 @@ class _HomeScreenState extends State<HomeScreen> {
           _SideNavigation(
             selectedIndex: _selectedIndex,
             isOledBlack: widget.settings.isOledBlack,
-            navigationColor: widget.settings.navigationSeedColor,
+            iconBarColors: widget.settings.iconBarColors,
+            iconBarColorStyle: widget.settings.iconBarColorStyle,
+            buttonColor: widget.settings.buttonColor,
+            buttonTextColor: widget.settings.buttonTextColor,
+            overlayRunning: _overlayStatus.running,
+            overlayBusy: _overlayBusy,
+            onOverlayPressed: _toggleOverlayMode,
             onDestinationSelected: selectDestination,
           ),
           VerticalDivider(
@@ -109,53 +183,59 @@ class _SideNavigation extends StatelessWidget {
   const _SideNavigation({
     required this.selectedIndex,
     required this.isOledBlack,
-    required this.navigationColor,
+    required this.iconBarColors,
+    required this.iconBarColorStyle,
+    required this.buttonColor,
+    required this.buttonTextColor,
+    required this.overlayRunning,
+    required this.overlayBusy,
+    required this.onOverlayPressed,
     required this.onDestinationSelected,
   });
 
   final int selectedIndex;
   final bool isOledBlack;
-  final Color navigationColor;
+  final SurfaceGradientColors iconBarColors;
+  final ColorFillStyle iconBarColorStyle;
+  final Color buttonColor;
+  final Color buttonTextColor;
+  final bool overlayRunning;
+  final bool overlayBusy;
+  final VoidCallback onOverlayPressed;
   final ValueChanged<int> onDestinationSelected;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final navigationTextColor = _onColor(navigationColor);
     final navigationScheme =
         ColorScheme.fromSeed(
-          seedColor: navigationColor,
+          seedColor: buttonColor,
           brightness: Theme.of(context).brightness,
         ).copyWith(
-          primary: navigationColor,
-          onPrimary: navigationTextColor,
-          primaryContainer: navigationColor,
-          onPrimaryContainer: navigationTextColor,
+          primary: buttonColor,
+          onPrimary: buttonTextColor,
+          primaryContainer: buttonColor,
+          onPrimaryContainer: buttonTextColor,
         );
     final oledBlack =
         Theme.of(context).brightness == Brightness.dark && isOledBlack;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final railTintAlpha = dark ? 0.16 : 0.30;
     final railColor = oledBlack
         ? Colors.black
-        : Color.alphaBlend(
-            navigationScheme.primary.withValues(alpha: 0.16),
-            colorScheme.surface,
+        : iconBarColors.iconBarColor(
+            style: iconBarColorStyle,
+            baseColor: Color.alphaBlend(
+              iconBarColors.start.withValues(alpha: railTintAlpha),
+              colorScheme.surface,
+            ),
           );
     final railGradient = oledBlack
         ? null
-        : LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color.alphaBlend(
-                navigationScheme.primary.withValues(alpha: 0.20),
-                colorScheme.surface,
-              ),
-              railColor,
-              Color.alphaBlend(
-                navigationScheme.primary.withValues(alpha: 0.10),
-                colorScheme.surface,
-              ),
-            ],
+        : iconBarColors.iconBarGradient(
+            style: iconBarColorStyle,
+            baseColor: railColor,
+            vertical: true,
           );
 
     return SafeArea(
@@ -174,7 +254,10 @@ class _SideNavigation extends StatelessWidget {
             right: BorderSide(
               color: oledBlack
                   ? const Color(0xFF2D363B)
-                  : colorScheme.outlineVariant.withValues(alpha: 0.76),
+                  : Color.alphaBlend(
+                      iconBarColors.start.withValues(alpha: dark ? 0.16 : 0.28),
+                      colorScheme.outlineVariant,
+                    ),
             ),
           ),
         ),
@@ -200,6 +283,11 @@ class _SideNavigation extends StatelessWidget {
                         ? 28.0
                         : 44.0
                   : 64.0;
+              final overlayButtonHeight = compact
+                  ? iconOnly
+                        ? 30.0
+                        : 44.0
+                  : 54.0;
               final buttonHeight = compact
                   ? ((availableHeight - verticalPadding * 2) /
                             _navigationItems.length)
@@ -208,7 +296,10 @@ class _SideNavigation extends StatelessWidget {
                   : 68.0;
               final horizontalPadding = iconOnly ? 5.0 : 6.0;
               final contentHeight =
-                  buttonHeight * _navigationItems.length + verticalPadding * 2;
+                  buttonHeight * _navigationItems.length +
+                  overlayButtonHeight +
+                  8 +
+                  verticalPadding * 2;
 
               Widget buildNavigationContent({required bool fillHeight}) {
                 return Padding(
@@ -217,26 +308,52 @@ class _SideNavigation extends StatelessWidget {
                     horizontal: horizontalPadding,
                   ),
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     mainAxisSize: fillHeight
                         ? MainAxisSize.max
                         : MainAxisSize.min,
                     children: [
-                      for (
-                        var index = 0;
-                        index < _navigationItems.length;
-                        index++
-                      )
-                        _NavigationButton(
-                          item: _navigationItems[index],
-                          selected: selectedIndex == index,
+                      if (fillHeight)
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: _navigationButtons(
+                              navigationScheme: navigationScheme,
+                              buttonTextColor: buttonTextColor,
+                              buttonHeight: buttonHeight,
+                              compact: compact,
+                              iconOnly: iconOnly,
+                            ),
+                          ),
+                        )
+                      else
+                        ..._navigationButtons(
                           navigationScheme: navigationScheme,
-                          height: buttonHeight,
+                          buttonTextColor: buttonTextColor,
+                          buttonHeight: buttonHeight,
                           compact: compact,
                           iconOnly: iconOnly,
-                          horizontal: false,
-                          onTap: () => onDestinationSelected(index),
                         ),
+                      const SizedBox(height: 8),
+                      _NavigationButton(
+                        item: _NavigationItem(
+                          label: overlayRunning ? 'Stop' : 'Overlay',
+                          icon: overlayRunning
+                              ? Icons.close_fullscreen
+                              : Icons.picture_in_picture_alt_outlined,
+                          selectedIcon: overlayRunning
+                              ? Icons.close_fullscreen
+                              : Icons.picture_in_picture_alt,
+                        ),
+                        selected: overlayRunning,
+                        navigationScheme: navigationScheme,
+                        buttonTextColor: buttonTextColor,
+                        height: overlayButtonHeight,
+                        compact: compact,
+                        iconOnly: iconOnly,
+                        horizontal: false,
+                        busy: overlayBusy,
+                        onTap: onOverlayPressed,
+                      ),
                     ],
                   ),
                 );
@@ -256,10 +373,27 @@ class _SideNavigation extends StatelessWidget {
     );
   }
 
-  Color _onColor(Color color) {
-    return ThemeData.estimateBrightnessForColor(color) == Brightness.dark
-        ? Colors.white
-        : Colors.black;
+  List<Widget> _navigationButtons({
+    required ColorScheme navigationScheme,
+    required Color buttonTextColor,
+    required double buttonHeight,
+    required bool compact,
+    required bool iconOnly,
+  }) {
+    return [
+      for (var index = 0; index < _navigationItems.length; index++)
+        _NavigationButton(
+          item: _navigationItems[index],
+          selected: selectedIndex == index,
+          navigationScheme: navigationScheme,
+          buttonTextColor: buttonTextColor,
+          height: buttonHeight,
+          compact: compact,
+          iconOnly: iconOnly,
+          horizontal: false,
+          onTap: () => onDestinationSelected(index),
+        ),
+    ];
   }
 }
 
@@ -280,9 +414,11 @@ class _NavigationButton extends StatelessWidget {
     required this.item,
     required this.selected,
     required this.navigationScheme,
+    required this.buttonTextColor,
     this.height,
     this.compact = false,
     this.iconOnly = false,
+    this.busy = false,
     required this.horizontal,
     required this.onTap,
   });
@@ -290,18 +426,19 @@ class _NavigationButton extends StatelessWidget {
   final _NavigationItem item;
   final bool selected;
   final ColorScheme navigationScheme;
+  final Color buttonTextColor;
   final double? height;
   final bool compact;
   final bool iconOnly;
+  final bool busy;
   final bool horizontal;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final foreground = selected
         ? navigationScheme.onPrimaryContainer
-        : colorScheme.onSurface;
+        : buttonTextColor.withValues(alpha: 0.82);
 
     return Tooltip(
       message: item.label,
@@ -348,11 +485,19 @@ class _NavigationButton extends StatelessWidget {
 
   Widget _iconOnlyContent(Color foreground) {
     return Center(
-      child: Icon(
-        selected ? item.selectedIcon : item.icon,
-        color: foreground,
-        size: 21,
-      ),
+      child: busy
+          ? SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: foreground,
+              ),
+            )
+          : Icon(
+              selected ? item.selectedIcon : item.icon,
+              color: foreground,
+              size: 21,
+            ),
     );
   }
 
@@ -360,11 +505,19 @@ class _NavigationButton extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(
-          selected ? item.selectedIcon : item.icon,
-          color: foreground,
-          size: 22,
-        ),
+        busy
+            ? SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: foreground,
+                ),
+              )
+            : Icon(
+                selected ? item.selectedIcon : item.icon,
+                color: foreground,
+                size: 22,
+              ),
         const SizedBox(width: 6),
         Flexible(
           child: Text(
@@ -385,11 +538,19 @@ class _NavigationButton extends StatelessWidget {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(
-          selected ? item.selectedIcon : item.icon,
-          color: foreground,
-          size: compact ? 21 : 23,
-        ),
+        busy
+            ? SizedBox.square(
+                dimension: compact ? 17 : 19,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: foreground,
+                ),
+              )
+            : Icon(
+                selected ? item.selectedIcon : item.icon,
+                color: foreground,
+                size: compact ? 21 : 23,
+              ),
         SizedBox(height: compact ? 2 : 4),
         Text(
           item.label,

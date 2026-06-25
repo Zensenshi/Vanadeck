@@ -23,6 +23,10 @@ class GameStatusService {
   static PlayerStatus? _latestStatus;
   static final Set<Socket> _commandSockets = {};
   static final Set<Socket> _binaryCommandSockets = {};
+  static ServerSocket? _server;
+  static RawDatagramSocket? _statusSocket;
+  static StreamSubscription<RawSocketEvent>? _statusSubscription;
+  static bool _stopping = false;
   static const _maxLegacySocketBufferLength = 1024 * 1024;
 
   Future<PlayerStatus> getPlayerStatus() async {
@@ -91,23 +95,55 @@ class GameStatusService {
     return sendCommands([message]);
   }
 
+  static void startDefaultListener() {
+    _listenerFuture ??= const GameStatusService()._listenForStatus();
+  }
+
+  static Future<void> stopListening() async {
+    final listenerFuture = _listenerFuture;
+    _listenerFuture = null;
+    _stopping = true;
+
+    await _statusSubscription?.cancel();
+    _statusSubscription = null;
+    _statusSocket?.close();
+    _statusSocket = null;
+    await _server?.close();
+    _server = null;
+
+    for (final socket in List<Socket>.of(_commandSockets)) {
+      try {
+        await socket.close();
+      } catch (_) {
+        // Best effort: sockets may already be closed by their stream handlers.
+      }
+    }
+    _commandSockets.clear();
+    _binaryCommandSockets.clear();
+
+    if (listenerFuture != null) {
+      try {
+        await listenerFuture.timeout(const Duration(milliseconds: 500));
+      } catch (_) {
+        // Closing the listener can race with the async accept loop.
+      }
+    }
+    _stopping = false;
+  }
+
   void _ensureListening() {
     _listenerFuture ??= _listenForStatus();
   }
 
   Future<void> _listenForStatus() async {
-    ServerSocket? server;
-    RawDatagramSocket? statusSocket;
-    StreamSubscription<RawSocketEvent>? statusSubscription;
-
     try {
       final udpSocket = await RawDatagramSocket.bind(
         host,
         port,
         reuseAddress: true,
       );
-      statusSocket = udpSocket;
-      statusSubscription = udpSocket.listen((event) {
+      _statusSocket = udpSocket;
+      _statusSubscription = udpSocket.listen((event) {
         if (event != RawSocketEvent.read) {
           return;
         }
@@ -121,17 +157,24 @@ class GameStatusService {
         }
       });
 
-      server = await ServerSocket.bind(host, port, shared: true);
+      final server = await ServerSocket.bind(host, port, shared: true);
+      _server = server;
       await for (final socket in server) {
         _readStatusSocket(socket);
       }
     } catch (error, stackTrace) {
-      _statusController.addError(error, stackTrace);
+      if (!_stopping) {
+        _statusController.addError(error, stackTrace);
+      }
       _listenerFuture = null;
     } finally {
-      await statusSubscription?.cancel();
-      statusSocket?.close();
-      await server?.close();
+      await _statusSubscription?.cancel();
+      _statusSubscription = null;
+      _statusSocket?.close();
+      _statusSocket = null;
+      await _server?.close();
+      _server = null;
+      _stopping = false;
     }
   }
 

@@ -32,9 +32,13 @@ class _MacroScreenState extends State<MacroScreen> {
   _MacroModifier _modifier = _MacroModifier.ctrl;
   int _pageSlideDirection = 1;
   String? _castingMacroKey;
+  String? _listeningMacroKey;
   DateTime? _castStartedAt;
+  DateTime? _castFeedbackListenUntil;
   Timer? _castTimer;
+  int _castPulseId = 0;
   bool _gameCastActive = false;
+  double? _lastGameCastProgress;
 
   @override
   void dispose() {
@@ -56,8 +60,17 @@ class _MacroScreenState extends State<MacroScreen> {
         final castFeedbackColor =
             widget.settings?.macroCastFeedbackColor ??
             AppSettingsController.defaultCastFeedbackColor;
+        final buttonColor =
+            widget.settings?.buttonColor ??
+            AppSettingsController.defaultSeedColor;
+        final buttonTextColor =
+            widget.settings?.buttonTextColor ??
+            AppSettingsController.defaultButtonTextColor;
         final gameCastProgress = _gameCastProgress(status);
-        _gameCastActive = status?.castState?.isCasting ?? false;
+        _updateGameCastTracking(
+          isCasting: status?.castState?.isCasting ?? false,
+          progress: gameCastProgress,
+        );
         final colorScheme = Theme.of(context).colorScheme;
 
         return Scaffold(
@@ -193,10 +206,13 @@ class _MacroScreenState extends State<MacroScreen> {
                                   casting:
                                       _castingMacroKey ==
                                       _macroKey(_modifier, slot),
+                                  castPulseId: _castPulseId,
                                   castProgress: gameCastProgress,
                                   castDuration: _fallbackCastProgressDuration,
                                   castFeedbackStyle: castFeedbackStyle,
                                   castFeedbackColor: castFeedbackColor,
+                                  buttonColor: buttonColor,
+                                  buttonTextColor: buttonTextColor,
                                   onTap: () => _activateMacroSlot(
                                     slot: slot,
                                     status: status,
@@ -308,10 +324,21 @@ class _MacroScreenState extends State<MacroScreen> {
   }
 
   void _startCastProgress(_MacroModifier modifier, int slot) {
+    final macroKey = _macroKey(modifier, slot);
+    _listeningMacroKey = macroKey;
+    _castFeedbackListenUntil = DateTime.now().add(_maxCastProgressDuration);
+    _showCastProgressPulse(macroKey);
+  }
+
+  void _showCastProgressPulse(String macroKey) {
     _castTimer?.cancel();
     _castStartedAt = DateTime.now();
+    if (!mounted) {
+      return;
+    }
     setState(() {
-      _castingMacroKey = _macroKey(modifier, slot);
+      _castingMacroKey = macroKey;
+      _castPulseId += 1;
     });
     _castTimer = Timer.periodic(_castProgressClearInterval, (timer) {
       if (!mounted) {
@@ -322,21 +349,88 @@ class _MacroScreenState extends State<MacroScreen> {
       final elapsed = startedAt == null
           ? _fallbackCastProgressDuration
           : DateTime.now().difference(startedAt);
-      final fallbackExpired = elapsed >= _fallbackCastProgressDuration;
-      final hardExpired = elapsed >= _maxCastProgressDuration;
-      if ((!fallbackExpired || _gameCastActive) && !hardExpired) {
+      final now = DateTime.now();
+      final visualExpired =
+          elapsed >= _fallbackCastProgressDuration && !_gameCastActive;
+      final listenUntil = _castFeedbackListenUntil;
+      final listenExpired = listenUntil != null && now.isAfter(listenUntil);
+      if (!visualExpired && !listenExpired) {
         return;
       }
 
       timer.cancel();
       _castTimer = null;
       _castStartedAt = null;
+      if (listenExpired) {
+        _listeningMacroKey = null;
+        _castFeedbackListenUntil = null;
+      }
       if (_castingMacroKey != null) {
         setState(() {
           _castingMacroKey = null;
         });
       }
     });
+  }
+
+  void _updateGameCastTracking({
+    required bool isCasting,
+    required double? progress,
+  }) {
+    final wasCasting = _gameCastActive;
+    final previousProgress = _lastGameCastProgress;
+    _gameCastActive = isCasting;
+    _lastGameCastProgress = isCasting ? progress : null;
+
+    final castStarted = isCasting && !wasCasting;
+    final castProgressRestarted =
+        isCasting &&
+        wasCasting &&
+        _castProgressRestarted(previousProgress, progress);
+    if (!castStarted && !castProgressRestarted) {
+      return;
+    }
+
+    final macroKey = _activeListeningMacroKey();
+    if (macroKey == null) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_gameCastActive) {
+        return;
+      }
+
+      final activeMacroKey = _activeListeningMacroKey();
+      if (activeMacroKey == null) {
+        return;
+      }
+
+      _showCastProgressPulse(activeMacroKey);
+    });
+  }
+
+  bool _castProgressRestarted(double? previous, double? current) {
+    if (previous == null || current == null) {
+      return false;
+    }
+
+    return previous > 0.55 && current < 0.35 && previous - current > 0.35;
+  }
+
+  String? _activeListeningMacroKey() {
+    final macroKey = _listeningMacroKey;
+    final listenUntil = _castFeedbackListenUntil;
+    if (macroKey == null || listenUntil == null) {
+      return null;
+    }
+    if (DateTime.now().isAfter(listenUntil)) {
+      _listeningMacroKey = null;
+      _castFeedbackListenUntil = null;
+      return null;
+    }
+
+    return macroKey;
   }
 
   String _macroKey(_MacroModifier modifier, int slot) {
@@ -839,10 +933,13 @@ class _MacroInputTile extends StatelessWidget {
     required this.name,
     required this.needsTarget,
     required this.casting,
+    required this.castPulseId,
     required this.castProgress,
     required this.castDuration,
     required this.castFeedbackStyle,
     required this.castFeedbackColor,
+    required this.buttonColor,
+    required this.buttonTextColor,
     required this.onTap,
     required this.onLongPress,
   });
@@ -852,10 +949,13 @@ class _MacroInputTile extends StatelessWidget {
   final String name;
   final bool needsTarget;
   final bool casting;
+  final int castPulseId;
   final double? castProgress;
   final Duration castDuration;
   final MacroCastFeedbackStyle castFeedbackStyle;
   final Color castFeedbackColor;
+  final Color buttonColor;
+  final Color buttonTextColor;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -873,8 +973,20 @@ class _MacroInputTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         child: Ink(
           decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest,
-            border: Border.all(color: colorScheme.outline),
+            color: Color.alphaBlend(
+              buttonColor.withValues(
+                alpha: Theme.of(context).brightness == Brightness.dark
+                    ? 0.46
+                    : 0.30,
+              ),
+              colorScheme.surfaceContainerHighest,
+            ),
+            border: Border.all(
+              color: Color.alphaBlend(
+                buttonColor.withValues(alpha: 0.34),
+                colorScheme.outline,
+              ),
+            ),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Stack(
@@ -892,7 +1004,7 @@ class _MacroInputTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w800,
-                        color: colorScheme.onSurface,
+                        color: buttonTextColor,
                       ),
                     ),
                     if (title.isNotEmpty) ...[
@@ -909,7 +1021,9 @@ class _MacroInputTile extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.labelSmall
                                   ?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
+                                    color: buttonTextColor.withValues(
+                                      alpha: 0.78,
+                                    ),
                                     fontWeight: FontWeight.w700,
                                   ),
                             ),
@@ -937,6 +1051,7 @@ class _MacroInputTile extends StatelessWidget {
               ),
               if (casting)
                 _CastFeedbackOverlay(
+                  key: ValueKey(castPulseId),
                   style: castFeedbackStyle,
                   color: castFeedbackColor,
                   progress: castProgress,
@@ -952,6 +1067,7 @@ class _MacroInputTile extends StatelessWidget {
 
 class _CastFeedbackOverlay extends StatelessWidget {
   const _CastFeedbackOverlay({
+    super.key,
     required this.style,
     required this.color,
     required this.progress,

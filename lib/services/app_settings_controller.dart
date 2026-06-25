@@ -7,58 +7,106 @@ import 'package:flutter/services.dart';
 
 enum MacroCastFeedbackStyle { fillBar, edgeGlow }
 
-enum AppGradientScheme {
-  none('None'),
-  seaGlass('Sea glass'),
-  duskBloom('Dusk bloom'),
-  emberSteel('Ember steel'),
-  deepCurrent('Deep current');
+enum OverlayAppearance {
+  gameGlass('Game glass'),
+  solidDark('Solid');
 
-  const AppGradientScheme(this.label);
+  const OverlayAppearance(this.label);
 
   final String label;
+}
 
-  LinearGradient? gradient({
+enum OverlayTabPosition {
+  top('Top'),
+  bottom('Bottom'),
+  left('Left'),
+  right('Right');
+
+  const OverlayTabPosition(this.label);
+
+  final String label;
+}
+
+enum ColorFillStyle {
+  solid('Solid'),
+  gradation('Gradation');
+
+  const ColorFillStyle(this.label);
+
+  final String label;
+}
+
+class SurfaceGradientColors {
+  const SurfaceGradientColors({required this.start, required this.end});
+
+  final Color start;
+  final Color end;
+
+  Color appColor({
+    required ColorFillStyle style,
     required Brightness brightness,
-    required Color seedColor,
     required Color fallbackColor,
     required bool isOledBlack,
   }) {
-    if (this == AppGradientScheme.none || isOledBlack) {
+    if (isOledBlack || style == ColorFillStyle.gradation) {
+      return fallbackColor;
+    }
+
+    return Color.alphaBlend(
+      start.withValues(alpha: brightness == Brightness.dark ? 0.48 : 0.30),
+      fallbackColor,
+    );
+  }
+
+  LinearGradient? appGradient({
+    required ColorFillStyle style,
+    required Brightness brightness,
+    required Color fallbackColor,
+    required bool isOledBlack,
+  }) {
+    if (isOledBlack || style == ColorFillStyle.solid) {
       return null;
     }
 
     final dark = brightness == Brightness.dark;
-    final colors = switch (this) {
-      AppGradientScheme.seaGlass =>
-        dark
-            ? const [Color(0xFF0D1918), Color(0xFF14312F), Color(0xFF1B2632)]
-            : const [Color(0xFFF2FAF8), Color(0xFFD8EEE9), Color(0xFFEAF1FA)],
-      AppGradientScheme.duskBloom =>
-        dark
-            ? const [Color(0xFF15121A), Color(0xFF2C1F32), Color(0xFF173340)]
-            : const [Color(0xFFFBF3F7), Color(0xFFE7E1FA), Color(0xFFE1F0F4)],
-      AppGradientScheme.emberSteel =>
-        dark
-            ? const [Color(0xFF171412), Color(0xFF34241C), Color(0xFF1D3037)]
-            : const [Color(0xFFFBF6EF), Color(0xFFF0D7C2), Color(0xFFDDE9EF)],
-      AppGradientScheme.deepCurrent =>
-        dark
-            ? const [Color(0xFF0D1218), Color(0xFF102B3A), Color(0xFF1D362B)]
-            : const [Color(0xFFF1F7FB), Color(0xFFD8EAF5), Color(0xFFDDEDE4)],
-      AppGradientScheme.none => [fallbackColor, fallbackColor],
-    };
+    final alpha = dark ? 0.30 : 0.20;
 
     return LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: [
-        Color.alphaBlend(
-          seedColor.withValues(alpha: dark ? 0.10 : 0.06),
-          colors[0],
-        ),
-        colors[1],
-        colors[2],
+        Color.alphaBlend(start.withValues(alpha: alpha), fallbackColor),
+        Color.alphaBlend(end.withValues(alpha: alpha * 0.86), fallbackColor),
+      ],
+    );
+  }
+
+  Color iconBarColor({
+    required ColorFillStyle style,
+    required Color baseColor,
+  }) {
+    if (style == ColorFillStyle.gradation) {
+      return baseColor;
+    }
+
+    return Color.alphaBlend(start.withValues(alpha: 0.54), baseColor);
+  }
+
+  LinearGradient? iconBarGradient({
+    required ColorFillStyle style,
+    required Color baseColor,
+    required bool vertical,
+  }) {
+    if (style == ColorFillStyle.solid) {
+      return null;
+    }
+
+    return LinearGradient(
+      begin: vertical ? Alignment.topCenter : Alignment.centerLeft,
+      end: vertical ? Alignment.bottomCenter : Alignment.centerRight,
+      colors: [
+        Color.alphaBlend(start.withValues(alpha: 0.42), baseColor),
+        Color.alphaBlend(end.withValues(alpha: 0.34), baseColor),
       ],
     );
   }
@@ -105,15 +153,26 @@ class AppSettingsController extends ChangeNotifier {
 
   final AppSettingsService _service;
   Color _seedColor = defaultSeedColor;
-  Color _navigationSeedColor = defaultSeedColor;
+  Color _buttonTextColor = defaultButtonTextColor;
+  SurfaceGradientColors _iconBarColors =
+      AppSettingsService.defaultIconBarColors;
+  ColorFillStyle _iconBarColorStyle = ColorFillStyle.solid;
   Color _macroCastFeedbackColor = defaultCastFeedbackColor;
   ThemeMode _themeMode = ThemeMode.dark;
+  bool _oledBlack = false;
   String _chatFontFamily = defaultChatFontFamily;
   double _chatFontSize = 14;
-  AppGradientScheme _backgroundGradientScheme = AppGradientScheme.none;
+  ColorFillStyle _backgroundColorStyle = ColorFillStyle.gradation;
+  SurfaceGradientColors _surfaceGradientColors =
+      AppSettingsService.defaultSurfaceGradientColors;
   Map<ChatColorRole, Color> _chatColors = _defaultChatColors();
   MacroCastFeedbackStyle _macroCastFeedbackStyle =
       MacroCastFeedbackStyle.fillBar;
+  double _overlayScale = AppSettingsService.defaultOverlayScale;
+  OverlayAppearance _overlayAppearance =
+      AppSettingsService.defaultOverlayAppearance;
+  OverlayTabPosition _overlayTabPosition =
+      AppSettingsService.defaultOverlayTabPosition;
   String? _lastKeyboardId;
   String? _lastKeyboardName;
   String? _resourceFolderName;
@@ -124,11 +183,24 @@ class AppSettingsController extends ChangeNotifier {
   bool _selectingBackgroundImage = false;
 
   static const defaultSeedColor = Color(0xFF3E6B5B);
+  static const defaultButtonTextColor = Colors.white;
   static const defaultCastFeedbackColor = Color(0xFF4FC3F7);
 
   Color get seedColor => _seedColor;
 
-  Color get navigationSeedColor => _navigationSeedColor;
+  Color get buttonColor => _seedColor;
+
+  Color get buttonTextColor => _buttonTextColor;
+
+  SurfaceGradientColors get iconBarColors => _iconBarColors;
+
+  Color get iconBarStartColor => _iconBarColors.start;
+
+  Color get iconBarEndColor => _iconBarColors.end;
+
+  ColorFillStyle get iconBarColorStyle => _iconBarColorStyle;
+
+  Color get navigationSeedColor => _iconBarColors.start;
 
   Color get macroCastFeedbackColor => _macroCastFeedbackColor;
 
@@ -138,13 +210,25 @@ class AppSettingsController extends ChangeNotifier {
 
   double get chatFontSize => _chatFontSize;
 
-  AppGradientScheme get backgroundGradientScheme => _backgroundGradientScheme;
+  ColorFillStyle get backgroundColorStyle => _backgroundColorStyle;
+
+  SurfaceGradientColors get surfaceGradientColors => _surfaceGradientColors;
+
+  Color get surfaceGradientStartColor => _surfaceGradientColors.start;
+
+  Color get surfaceGradientEndColor => _surfaceGradientColors.end;
 
   Map<ChatColorRole, Color> get chatColors => _chatColors;
 
   Color chatColor(ChatColorRole role) => _chatColors[role] ?? role.defaultColor;
 
   MacroCastFeedbackStyle get macroCastFeedbackStyle => _macroCastFeedbackStyle;
+
+  double get overlayScale => _overlayScale;
+
+  OverlayAppearance get overlayAppearance => _overlayAppearance;
+
+  OverlayTabPosition get overlayTabPosition => _overlayTabPosition;
 
   String? get lastKeyboardId => _lastKeyboardId;
 
@@ -162,19 +246,26 @@ class AppSettingsController extends ChangeNotifier {
 
   bool get selectingBackgroundImage => _selectingBackgroundImage;
 
-  bool get isOledBlack => _seedColor.toARGB32() == Colors.black.toARGB32();
+  bool get isOledBlack => _oledBlack;
 
   Future<void> load() async {
     final settings = await _service.load();
     _seedColor = settings.seedColor;
-    _navigationSeedColor = settings.navigationSeedColor;
+    _buttonTextColor = settings.buttonTextColor;
+    _iconBarColors = settings.iconBarColors;
+    _iconBarColorStyle = settings.iconBarColorStyle;
     _macroCastFeedbackColor = settings.macroCastFeedbackColor;
     _themeMode = settings.themeMode;
+    _oledBlack = settings.oledBlack;
     _chatFontFamily = settings.chatFontFamily;
     _chatFontSize = settings.chatFontSize;
-    _backgroundGradientScheme = settings.backgroundGradientScheme;
+    _backgroundColorStyle = settings.backgroundColorStyle;
+    _surfaceGradientColors = settings.surfaceGradientColors;
     _chatColors = settings.chatColors;
     _macroCastFeedbackStyle = settings.macroCastFeedbackStyle;
+    _overlayScale = settings.overlayScale;
+    _overlayAppearance = settings.overlayAppearance;
+    _overlayTabPosition = settings.overlayTabPosition;
     _lastKeyboardId = settings.lastKeyboardId;
     _lastKeyboardName = settings.lastKeyboardName;
     _resourceFolderName = settings.resourceFolderName;
@@ -190,10 +281,47 @@ class AppSettingsController extends ChangeNotifier {
     await _service.saveSeedColor(color);
   }
 
-  Future<void> setNavigationSeedColor(Color color) async {
-    _navigationSeedColor = color;
+  Future<void> setButtonTextColor(Color color) async {
+    _buttonTextColor = color;
     notifyListeners();
-    await _service.saveNavigationSeedColor(color);
+    await _service.saveButtonTextColor(color);
+  }
+
+  Future<void> setNavigationSeedColor(Color color) async {
+    await setIconBarStartColor(color);
+  }
+
+  Future<void> setIconBarColorStyle(ColorFillStyle style) async {
+    _iconBarColorStyle = style;
+    notifyListeners();
+    await _service.saveIconBarColorStyle(style);
+  }
+
+  Future<void> setIconBarStartColor(Color color) async {
+    _iconBarColors = SurfaceGradientColors(
+      start: color,
+      end: _iconBarColors.end,
+    );
+    notifyListeners();
+    await _service.saveIconBarStartColor(color);
+  }
+
+  Future<void> setIconBarEndColor(Color color) async {
+    _iconBarColors = SurfaceGradientColors(
+      start: _iconBarColors.start,
+      end: color,
+    );
+    notifyListeners();
+    await _service.saveIconBarEndColor(color);
+  }
+
+  Future<void> resetIconBarColors() async {
+    _iconBarColorStyle = ColorFillStyle.solid;
+    _iconBarColors = AppSettingsService.defaultIconBarColors;
+    notifyListeners();
+    await _service.saveIconBarColorStyle(_iconBarColorStyle);
+    await _service.saveIconBarStartColor(_iconBarColors.start);
+    await _service.saveIconBarEndColor(_iconBarColors.end);
   }
 
   Future<void> setMacroCastFeedbackColor(Color color) async {
@@ -208,6 +336,12 @@ class AppSettingsController extends ChangeNotifier {
     await _service.saveThemeMode(themeMode);
   }
 
+  Future<void> setOledBlack(bool oledBlack) async {
+    _oledBlack = oledBlack;
+    notifyListeners();
+    await _service.saveOledBlack(oledBlack);
+  }
+
   Future<void> setChatFontFamily(String fontFamily) async {
     _chatFontFamily = normalizeChatFontFamily(fontFamily);
     notifyListeners();
@@ -220,10 +354,35 @@ class AppSettingsController extends ChangeNotifier {
     await _service.saveChatFontSize(_chatFontSize);
   }
 
-  Future<void> setBackgroundGradientScheme(AppGradientScheme scheme) async {
-    _backgroundGradientScheme = scheme;
+  Future<void> setBackgroundColorStyle(ColorFillStyle style) async {
+    _backgroundColorStyle = style;
     notifyListeners();
-    await _service.saveBackgroundGradientScheme(scheme);
+    await _service.saveBackgroundColorStyle(style);
+  }
+
+  Future<void> setSurfaceGradientStartColor(Color color) async {
+    _surfaceGradientColors = SurfaceGradientColors(
+      start: color,
+      end: _surfaceGradientColors.end,
+    );
+    notifyListeners();
+    await _service.saveSurfaceGradientStartColor(color);
+  }
+
+  Future<void> setSurfaceGradientEndColor(Color color) async {
+    _surfaceGradientColors = SurfaceGradientColors(
+      start: _surfaceGradientColors.start,
+      end: color,
+    );
+    notifyListeners();
+    await _service.saveSurfaceGradientEndColor(color);
+  }
+
+  Future<void> resetSurfaceGradientColors() async {
+    _surfaceGradientColors = AppSettingsService.defaultSurfaceGradientColors;
+    notifyListeners();
+    await _service.saveSurfaceGradientStartColor(_surfaceGradientColors.start);
+    await _service.saveSurfaceGradientEndColor(_surfaceGradientColors.end);
   }
 
   Future<void> setChatColor(ChatColorRole role, Color color) async {
@@ -245,6 +404,29 @@ class AppSettingsController extends ChangeNotifier {
     _macroCastFeedbackStyle = style;
     notifyListeners();
     await _service.saveMacroCastFeedbackStyle(style);
+  }
+
+  Future<void> setOverlayScale(double scale) async {
+    _overlayScale = scale
+        .clamp(
+          AppSettingsService.minOverlayScale,
+          AppSettingsService.maxOverlayScale,
+        )
+        .toDouble();
+    notifyListeners();
+    await _service.saveOverlayScale(_overlayScale);
+  }
+
+  Future<void> setOverlayAppearance(OverlayAppearance appearance) async {
+    _overlayAppearance = appearance;
+    notifyListeners();
+    await _service.saveOverlayAppearance(appearance);
+  }
+
+  Future<void> setOverlayTabPosition(OverlayTabPosition position) async {
+    _overlayTabPosition = position;
+    notifyListeners();
+    await _service.saveOverlayTabPosition(position);
   }
 
   Future<void> rememberKeyboard({String? id, String? name}) async {
@@ -317,14 +499,21 @@ class AppSettingsController extends ChangeNotifier {
 class AppSettings {
   const AppSettings({
     required this.seedColor,
-    required this.navigationSeedColor,
+    required this.buttonTextColor,
+    required this.iconBarColors,
+    required this.iconBarColorStyle,
     required this.macroCastFeedbackColor,
     required this.themeMode,
+    required this.oledBlack,
     required this.chatFontFamily,
     required this.chatFontSize,
-    required this.backgroundGradientScheme,
+    required this.backgroundColorStyle,
+    required this.surfaceGradientColors,
     required this.chatColors,
     required this.macroCastFeedbackStyle,
+    required this.overlayScale,
+    required this.overlayAppearance,
+    required this.overlayTabPosition,
     this.lastKeyboardId,
     this.lastKeyboardName,
     this.resourceFolderName,
@@ -333,14 +522,21 @@ class AppSettings {
   });
 
   final Color seedColor;
-  final Color navigationSeedColor;
+  final Color buttonTextColor;
+  final SurfaceGradientColors iconBarColors;
+  final ColorFillStyle iconBarColorStyle;
   final Color macroCastFeedbackColor;
   final ThemeMode themeMode;
+  final bool oledBlack;
   final String chatFontFamily;
   final double chatFontSize;
-  final AppGradientScheme backgroundGradientScheme;
+  final ColorFillStyle backgroundColorStyle;
+  final SurfaceGradientColors surfaceGradientColors;
   final Map<ChatColorRole, Color> chatColors;
   final MacroCastFeedbackStyle macroCastFeedbackStyle;
+  final double overlayScale;
+  final OverlayAppearance overlayAppearance;
+  final OverlayTabPosition overlayTabPosition;
   final String? lastKeyboardId;
   final String? lastKeyboardName;
   final String? resourceFolderName;
@@ -353,27 +549,57 @@ class AppSettingsService {
 
   static const _channel = MethodChannel('vanadeck/settings');
   static const _navigationSeedColorKey = 'navigation_seed_color';
+  static const _buttonTextColorKey = 'button_text_color';
+  static const _oledBlackKey = 'oled_black';
+  static const _iconBarColorStyleKey = 'icon_bar_color_style';
+  static const _iconBarEndColorKey = 'icon_bar_end_color';
   static const _macroCastFeedbackColorKey = 'macro_cast_feedback_color';
   static const _macroCastFeedbackStyleKey = 'macro_cast_feedback_style';
+  static const _overlayScaleKey = 'overlay_scale';
+  static const _overlayAppearanceKey = 'overlay_appearance';
+  static const _overlayTabPositionKey = 'overlay_tab_position';
   static const _backgroundGradientSchemeKey = 'background_gradient_scheme';
+  static const _backgroundColorStyleKey = 'background_color_style';
+  static const _surfaceGradientStartColorKey = 'surface_gradient_start_color';
+  static const _surfaceGradientEndColorKey = 'surface_gradient_end_color';
   static const _chatColorsKey = 'chat_colors';
   static const _lastKeyboardIdKey = 'last_keyboard_id';
   static const _lastKeyboardNameKey = 'last_keyboard_name';
   static const _statusIconRecordSize = 0x1800;
   static const _statusIconPixelOffset = 0x2F4;
   static const _statusIconSize = 32;
+  static const minOverlayScale = 0.36;
+  static const maxOverlayScale = 0.72;
+  static const defaultOverlayScale = 0.41;
+  static const defaultOverlayAppearance = OverlayAppearance.gameGlass;
+  static const defaultOverlayTabPosition = OverlayTabPosition.top;
+  static const defaultIconBarColors = SurfaceGradientColors(
+    start: AppSettingsController.defaultSeedColor,
+    end: Color(0xFF1C7C82),
+  );
+  static const defaultSurfaceGradientColors = SurfaceGradientColors(
+    start: Color(0xFF1C7C82),
+    end: Color(0xFF5D6AA2),
+  );
   static final Map<int, Future<Uint8List?>> _iconCache = {};
 
   Future<AppSettings> load() async {
     final seedColor = await _loadSeedColor();
-    final navigationSeedColor = await _loadNavigationSeedColor(seedColor);
+    final buttonTextColor = await _loadButtonTextColor(seedColor);
+    final iconBarColors = await _loadIconBarColors(seedColor);
+    final iconBarColorStyle = await _loadIconBarColorStyle();
     final macroCastFeedbackColor = await _loadMacroCastFeedbackColor();
     final themeMode = await _loadThemeMode();
+    final oledBlack = await _loadOledBlack(seedColor);
     final chatFontFamily = await _loadChatFontFamily();
     final chatFontSize = await _loadChatFontSize();
-    final backgroundGradientScheme = await _loadBackgroundGradientScheme();
+    final backgroundColorStyle = await _loadBackgroundColorStyle();
+    final surfaceGradientColors = await _loadSurfaceGradientColors();
     final chatColors = await _loadChatColors();
     final macroCastFeedbackStyle = await _loadMacroCastFeedbackStyle();
+    final overlayScale = await _loadOverlayScale();
+    final overlayAppearance = await loadOverlayAppearance();
+    final overlayTabPosition = await loadOverlayTabPosition();
     final lastKeyboardId = await _loadSetting(_lastKeyboardIdKey);
     final lastKeyboardName = await _loadSetting(_lastKeyboardNameKey);
     final folderName = await resourceFolderName();
@@ -381,14 +607,21 @@ class AppSettingsService {
     final backgroundBytes = await loadBackgroundImageBytes();
     return AppSettings(
       seedColor: seedColor,
-      navigationSeedColor: navigationSeedColor,
+      buttonTextColor: buttonTextColor,
+      iconBarColors: iconBarColors,
+      iconBarColorStyle: iconBarColorStyle,
       macroCastFeedbackColor: macroCastFeedbackColor,
       themeMode: themeMode,
+      oledBlack: oledBlack,
       chatFontFamily: chatFontFamily,
       chatFontSize: chatFontSize,
-      backgroundGradientScheme: backgroundGradientScheme,
+      backgroundColorStyle: backgroundColorStyle,
+      surfaceGradientColors: surfaceGradientColors,
       chatColors: chatColors,
       macroCastFeedbackStyle: macroCastFeedbackStyle,
+      overlayScale: overlayScale,
+      overlayAppearance: overlayAppearance,
+      overlayTabPosition: overlayTabPosition,
       lastKeyboardId: lastKeyboardId,
       lastKeyboardName: lastKeyboardName,
       resourceFolderName: folderName,
@@ -411,16 +644,27 @@ class AppSettingsService {
   }
 
   Future<void> saveNavigationSeedColor(Color color) async {
-    try {
-      await _channel.invokeMethod<void>('saveSetting', {
-        'key': _navigationSeedColorKey,
-        'value': color.toARGB32().toString(),
-      });
-    } on MissingPluginException {
-      return;
-    } on PlatformException {
-      return;
-    }
+    await saveIconBarStartColor(color);
+  }
+
+  Future<void> saveButtonTextColor(Color color) async {
+    await _saveSetting(_buttonTextColorKey, color.toARGB32().toString());
+  }
+
+  Future<void> saveOledBlack(bool oledBlack) async {
+    await _saveSetting(_oledBlackKey, oledBlack.toString());
+  }
+
+  Future<void> saveIconBarColorStyle(ColorFillStyle style) async {
+    await _saveSetting(_iconBarColorStyleKey, style.name);
+  }
+
+  Future<void> saveIconBarStartColor(Color color) async {
+    await _saveSetting(_navigationSeedColorKey, color.toARGB32().toString());
+  }
+
+  Future<void> saveIconBarEndColor(Color color) async {
+    await _saveSetting(_iconBarEndColorKey, color.toARGB32().toString());
   }
 
   Future<void> saveMacroCastFeedbackColor(Color color) async {
@@ -434,6 +678,26 @@ class AppSettingsService {
     } on PlatformException {
       return;
     }
+  }
+
+  Future<Color> loadMacroCastFeedbackColor() {
+    return _loadMacroCastFeedbackColor();
+  }
+
+  Future<Color> loadButtonColor() {
+    return _loadSeedColor();
+  }
+
+  Future<Color> loadButtonTextColor() async {
+    return _loadButtonTextColor(await _loadSeedColor());
+  }
+
+  Future<ColorFillStyle> loadIconBarColorStyle() {
+    return _loadIconBarColorStyle();
+  }
+
+  Future<SurfaceGradientColors> loadIconBarColors() async {
+    return _loadIconBarColors(await _loadSeedColor());
   }
 
   Future<void> saveThemeMode(ThemeMode themeMode) async {
@@ -479,8 +743,71 @@ class AppSettingsService {
     }
   }
 
-  Future<void> saveBackgroundGradientScheme(AppGradientScheme scheme) async {
-    await _saveSetting(_backgroundGradientSchemeKey, scheme.name);
+  Future<void> saveOverlayScale(double scale) async {
+    try {
+      await _channel.invokeMethod<void>('saveSetting', {
+        'key': _overlayScaleKey,
+        'value': scale.toStringAsFixed(3),
+      });
+    } on MissingPluginException {
+      return;
+    } on PlatformException {
+      return;
+    }
+  }
+
+  Future<void> saveOverlayAppearance(OverlayAppearance appearance) async {
+    await _saveSetting(_overlayAppearanceKey, appearance.name);
+  }
+
+  Future<void> saveOverlayTabPosition(OverlayTabPosition position) async {
+    await _saveSetting(_overlayTabPositionKey, position.name);
+  }
+
+  Future<OverlayAppearance> loadOverlayAppearance() async {
+    final value = await _loadSetting(_overlayAppearanceKey);
+    return OverlayAppearance.values.firstWhere(
+      (appearance) => appearance.name == value,
+      orElse: () => defaultOverlayAppearance,
+    );
+  }
+
+  Future<OverlayTabPosition> loadOverlayTabPosition() async {
+    final value = await _loadSetting(_overlayTabPositionKey);
+    return OverlayTabPosition.values.firstWhere(
+      (position) => position.name == value,
+      orElse: () => defaultOverlayTabPosition,
+    );
+  }
+
+  Future<void> saveSurfaceGradientStartColor(Color color) async {
+    await _saveSetting(
+      _surfaceGradientStartColorKey,
+      color.toARGB32().toString(),
+    );
+  }
+
+  Future<void> saveSurfaceGradientEndColor(Color color) async {
+    await _saveSetting(
+      _surfaceGradientEndColorKey,
+      color.toARGB32().toString(),
+    );
+  }
+
+  Future<Color> loadSurfaceGradientStartColor() async {
+    return (await _loadSurfaceGradientColors()).start;
+  }
+
+  Future<Color> loadSurfaceGradientEndColor() async {
+    return (await _loadSurfaceGradientColors()).end;
+  }
+
+  Future<void> saveBackgroundColorStyle(ColorFillStyle style) async {
+    await _saveSetting(_backgroundColorStyleKey, style.name);
+  }
+
+  Future<ColorFillStyle> loadBackgroundColorStyle() {
+    return _loadBackgroundColorStyle();
   }
 
   Future<void> saveChatColors(Map<ChatColorRole, Color> colors) async {
@@ -581,26 +908,41 @@ class AppSettingsService {
     return AppSettingsController.defaultSeedColor;
   }
 
+  Future<Color> _loadButtonTextColor(Color seedColor) async {
+    final fallback = _onColor(seedColor);
+    final stored = _parseStoredColor(await _loadSetting(_buttonTextColorKey));
+    return stored ?? fallback;
+  }
+
+  Future<SurfaceGradientColors> _loadIconBarColors(Color seedColor) async {
+    final start = await _loadNavigationSeedColor(seedColor);
+    final end =
+        _parseStoredColor(await _loadSetting(_iconBarEndColorKey)) ??
+        defaultIconBarColors.end;
+    return SurfaceGradientColors(start: start, end: end);
+  }
+
   Future<Color> _loadNavigationSeedColor(Color seedColor) async {
     final fallback = seedColor.toARGB32() == Colors.black.toARGB32()
         ? AppSettingsController.defaultSeedColor
         : seedColor;
-    try {
-      final value = await _channel.invokeMethod<String>(
-        'loadSetting',
-        _navigationSeedColorKey,
-      );
-      final parsed = int.tryParse(value ?? '');
-      if (parsed != null) {
-        return Color(parsed.toUnsigned(32));
-      }
-    } on MissingPluginException {
-      return fallback;
-    } on PlatformException {
-      return fallback;
-    }
+    return _parseStoredColor(await _loadSetting(_navigationSeedColorKey)) ??
+        fallback;
+  }
 
-    return fallback;
+  Future<ColorFillStyle> _loadIconBarColorStyle() async {
+    return _loadColorFillStyle(
+      key: _iconBarColorStyleKey,
+      fallback: ColorFillStyle.solid,
+    );
+  }
+
+  Future<bool> _loadOledBlack(Color seedColor) async {
+    final value = await _loadSetting(_oledBlackKey);
+    if (value != null) {
+      return value == 'true';
+    }
+    return seedColor.toARGB32() == Colors.black.toARGB32();
   }
 
   Future<Color> _loadMacroCastFeedbackColor() async {
@@ -673,12 +1015,80 @@ class AppSettingsService {
     }
   }
 
-  Future<AppGradientScheme> _loadBackgroundGradientScheme() async {
-    final value = await _loadSetting(_backgroundGradientSchemeKey);
-    return AppGradientScheme.values.firstWhere(
-      (scheme) => scheme.name == value,
-      orElse: () => AppGradientScheme.none,
+  Future<double> _loadOverlayScale() async {
+    final value = await _loadSetting(_overlayScaleKey);
+    final parsed = double.tryParse(value ?? '');
+    return (parsed ?? defaultOverlayScale)
+        .clamp(minOverlayScale, maxOverlayScale)
+        .toDouble();
+  }
+
+  Future<ColorFillStyle> _loadBackgroundColorStyle() async {
+    return _loadColorFillStyle(
+      key: _backgroundColorStyleKey,
+      fallback: ColorFillStyle.gradation,
     );
+  }
+
+  Future<SurfaceGradientColors> _loadSurfaceGradientColors() async {
+    final legacyColors = _legacySurfaceGradientColors(
+      await _loadSetting(_backgroundGradientSchemeKey),
+    );
+    final fallback = legacyColors ?? defaultSurfaceGradientColors;
+    final start =
+        _parseStoredColor(await _loadSetting(_surfaceGradientStartColorKey)) ??
+        fallback.start;
+    final end =
+        _parseStoredColor(await _loadSetting(_surfaceGradientEndColorKey)) ??
+        fallback.end;
+    return SurfaceGradientColors(start: start, end: end);
+  }
+
+  Future<ColorFillStyle> _loadColorFillStyle({
+    required String key,
+    required ColorFillStyle fallback,
+  }) async {
+    final value = await _loadSetting(key);
+    return ColorFillStyle.values.firstWhere(
+      (style) => style.name == value,
+      orElse: () => fallback,
+    );
+  }
+
+  SurfaceGradientColors? _legacySurfaceGradientColors(String? value) {
+    return switch (value) {
+      'seaGlass' => const SurfaceGradientColors(
+        start: Color(0xFF1C7C82),
+        end: Color(0xFF5D6AA2),
+      ),
+      'duskBloom' => const SurfaceGradientColors(
+        start: Color(0xFF80589B),
+        end: Color(0xFF1C7C82),
+      ),
+      'emberSteel' => const SurfaceGradientColors(
+        start: Color(0xFF9B5D2E),
+        end: Color(0xFF2962A8),
+      ),
+      'deepCurrent' => const SurfaceGradientColors(
+        start: Color(0xFF2962A8),
+        end: Color(0xFF2F6F3E),
+      ),
+      _ => null,
+    };
+  }
+
+  Color? _parseStoredColor(String? value) {
+    final parsed = int.tryParse(value ?? '');
+    if (parsed == null) {
+      return null;
+    }
+    return Color(parsed.toUnsigned(32));
+  }
+
+  Color _onColor(Color color) {
+    return ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
   }
 
   Future<Map<ChatColorRole, Color>> _loadChatColors() async {
@@ -703,14 +1113,6 @@ class AppSettingsService {
     } on FormatException {
       return colors;
     }
-  }
-
-  Color? _parseStoredColor(String? value) {
-    final parsed = int.tryParse(value ?? '');
-    if (parsed == null) {
-      return null;
-    }
-    return Color(parsed.toUnsigned(32));
   }
 
   Future<String?> _loadSetting(String key) async {

@@ -333,7 +333,7 @@ class _MapDisplayState extends State<_MapDisplay>
           name: entity.name,
           position: position,
           color: isMob ? const Color(0xFFFF4B4B) : const Color(0xFF35AEE8),
-          size: isMob ? 1 : 2,
+          size: 1,
         ),
       );
     }

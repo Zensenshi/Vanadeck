@@ -946,10 +946,12 @@ void main() {
       MaterialApp(home: SettingsScreen(settings: AppSettingsController())),
     );
 
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Choose color').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Choose App color'), findsOneWidget);
+    expect(find.text('Choose Button color'), findsOneWidget);
     await tester.tap(find.byTooltip('#1C7C82'));
     await tester.pump();
     expect(tester.takeException(), isNull);
@@ -961,9 +963,17 @@ void main() {
     );
 
     await tester.dragUntilVisible(
-      find.text('Credits'),
+      find.text('About'),
       find.byType(ListView),
       const Offset(0, -160),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('About'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('Credits'),
+      find.byType(ListView),
+      const Offset(0, -80),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Credits'));

@@ -3,7 +3,7 @@
 
 addon.name = 'vanadeck'
 addon.author = 'VanaDeck contributors'
-addon.version = '1.0'
+addon.version = '0.3.0'
 addon.desc = 'Send FFXI player status to localhost:8080 using VanaDeck binary frames.'
 
 require 'common'
@@ -221,6 +221,8 @@ local protocol_max_payload_size = 1024 * 1024
 local protocol_type_status = 1
 local protocol_type_command = 2
 local protocol_type_hello = 3
+local ashita_command_mode_typed = (type(CommandMode) == 'table' and CommandMode.Typed) or 1
+local ashita_command_mode_macro = (type(CommandMode) == 'table' and CommandMode.Macro) or 2
 local protocol_value_null = 0
 local protocol_value_false = 1
 local protocol_value_true = 2
@@ -1062,6 +1064,14 @@ local function read_normalized_macro_value(macro_obj, offsets, normalizer)
     return zero_value
 end
 
+local function trim_macro_text(text)
+    if type(text) ~= 'string' then
+        return ''
+    end
+
+    return text:gsub('%z', ''):gsub('^%s+', ''):gsub('%s+$', '')
+end
+
 local function read_macro_name(index)
     if not macro_lib or not macro_lib.get_name then
         return ''
@@ -1072,7 +1082,7 @@ local function read_macro_name(index)
         return ''
     end
 
-    name = name:gsub('%z', ''):gsub('^%s+', ''):gsub('%s+$', '')
+    name = trim_macro_text(name)
     name = shiftjis_to_utf8_if_needed(name)
     return name
 end
@@ -1093,7 +1103,7 @@ local function read_macro_needs_target(index)
     for line = 0, 5 do
         local ok, text = pcall(macro_lib.get_line, index, line)
         if ok and type(text) == 'string' then
-            text = text:gsub('%z', ''):lower()
+            text = trim_macro_text(text):lower()
             if text:find('<stpc>', 1, true) then
                 return true
             end
@@ -1302,8 +1312,19 @@ local function set_ashita_key(dik, down)
         return false
     end
 
+    local sendKey = nil
+    local hasSendKey, method = pcall(function()
+        return manager.SendKey
+    end)
+    if hasSendKey and type(method) == 'function' then
+        sendKey = method
+    else
+        ashita_send_key_supported = false
+        return false
+    end
+
     local ok = pcall(function()
-        manager:SendKey(dik, down)
+        sendKey(manager, dik, down)
     end)
 
     if not ok then
@@ -1637,7 +1658,7 @@ local function read_macro_lines(index)
     for line = 0, 5 do
         local ok, text = pcall(macro_lib.get_line, index, line)
         if ok and type(text) == 'string' then
-            text = text:gsub('%z', ''):gsub('^%s+', ''):gsub('%s+$', '')
+            text = trim_macro_text(text)
             if text ~= '' then
                 lines[#lines + 1] = text
             end
@@ -1657,7 +1678,7 @@ local function queue_macro_command(command)
         return false
     end
 
-    command = command:gsub('^%s+', ''):gsub('%s+$', '')
+    command = trim_macro_text(command)
     if command == '' then
         return false
     end
@@ -1667,7 +1688,7 @@ local function queue_macro_command(command)
         return false
     end
 
-    chatManager:QueueCommand(2, command)
+    chatManager:QueueCommand(ashita_command_mode_macro, command)
     return true
 end
 
@@ -2122,7 +2143,7 @@ local function queue_game_command(command)
 
     local chatManager = AshitaCore:GetChatManager()
     if chatManager then
-        chatManager:QueueCommand(1, command)
+        chatManager:QueueCommand(ashita_command_mode_typed, command)
     end
 end
 
@@ -2480,6 +2501,19 @@ local function call_castbar_number(castbar, method_name)
     return tonumber(value)
 end
 
+local function normalize_cast_progress(value)
+    local progress = tonumber(value)
+    if progress == nil then
+        return nil
+    end
+
+    if progress > 1 and progress <= 100 then
+        progress = progress / 100
+    end
+
+    return math.max(0, math.min(1, progress))
+end
+
 local function read_cast_state(memory)
     if not memory then
         return nil
@@ -2496,11 +2530,9 @@ local function read_cast_state(memory)
     local castType = call_castbar_number(castbar, 'GetCastType')
 
     if progress == nil and max ~= nil and max > 0 and count ~= nil then
-        progress = count / max
-    end
-
-    if progress ~= nil then
-        progress = math.max(0, math.min(1, progress))
+        progress = normalize_cast_progress(count / max)
+    else
+        progress = normalize_cast_progress(progress)
     end
 
     local isCasting = false
@@ -3015,7 +3047,8 @@ local function build_status(includeEntityData)
     if macroMetadataKey ~= last_sent_macro_metadata_key or includeEntityData then
         local names, needsTarget = read_macro_metadata()
         local signature = macro_metadata_signature(names, needsTarget)
-        if macroMetadataKey ~= last_sent_macro_metadata_key or
+        if includeEntityData or
+            macroMetadataKey ~= last_sent_macro_metadata_key or
             signature ~= last_sent_macro_metadata_signature then
             macroState.names = names
             macroState.needsTarget = needsTarget
