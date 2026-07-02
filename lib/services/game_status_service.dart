@@ -313,6 +313,11 @@ class GameStatusService {
     final playerJson = _nestedMap(json['player']) ?? json;
     final partyJson =
         _listValue(json['partyMembers']) ?? _listValue(json['party']);
+    final macroJson =
+        _nestedMap(json['macro']) ??
+        _nestedMap(json['macros']) ??
+        _nestedMap(playerJson['macro']) ??
+        _nestedMap(playerJson['macros']);
     if (!_hasCrediblePlayerPayload(json, playerJson, partyJson)) {
       return null;
     }
@@ -401,10 +406,10 @@ class GameStatusService {
       currentExp: currentExp,
       expToNextLevel: expToNextLevel ?? 0,
       activeBuffs: _activeBuffs(json, playerJson),
-      activeMacroBook: _activeMacroBook(json, playerJson),
-      activeMacroSet: _activeMacroSet(json, playerJson),
-      macroNames: _macroNames(json, playerJson),
-      macroNeedsTarget: _macroNeedsTarget(json, playerJson),
+      activeMacroBook: _activeMacroBook(json, playerJson, macroJson),
+      activeMacroSet: _activeMacroSet(json, playerJson, macroJson),
+      macroNames: _macroNames(json, playerJson, macroJson),
+      macroNeedsTarget: _macroNeedsTarget(json, playerJson, macroJson),
       activeTarget: activeTarget,
       isSubTargetActive: isSubTargetActive,
       chatMessages: _chatMessages(json),
@@ -828,12 +833,8 @@ class GameStatusService {
   int _activeMacroBook(
     Map<String, dynamic> rootJson,
     Map<String, dynamic> playerJson,
+    Map<String, dynamic>? macroJson,
   ) {
-    final macroJson =
-        _nestedMap(rootJson['macro']) ??
-        _nestedMap(rootJson['macros']) ??
-        _nestedMap(playerJson['macro']) ??
-        _nestedMap(playerJson['macros']);
     final value =
         _intValue(rootJson['activeMacroBook']) ??
         _intValue(rootJson['currentMacroBook']) ??
@@ -859,12 +860,8 @@ class GameStatusService {
   int _activeMacroSet(
     Map<String, dynamic> rootJson,
     Map<String, dynamic> playerJson,
+    Map<String, dynamic>? macroJson,
   ) {
-    final macroJson =
-        _nestedMap(rootJson['macro']) ??
-        _nestedMap(rootJson['macros']) ??
-        _nestedMap(playerJson['macro']) ??
-        _nestedMap(playerJson['macros']);
     final value =
         _intValue(rootJson['activeMacroSet']) ??
         _intValue(rootJson['currentMacroSet']) ??
@@ -890,12 +887,8 @@ class GameStatusService {
   List<String> _macroNames(
     Map<String, dynamic> rootJson,
     Map<String, dynamic> playerJson,
+    Map<String, dynamic>? macroJson,
   ) {
-    final macroJson =
-        _nestedMap(rootJson['macro']) ??
-        _nestedMap(rootJson['macros']) ??
-        _nestedMap(playerJson['macro']) ??
-        _nestedMap(playerJson['macros']);
     final namesJson =
         rootJson['macroNames'] ??
         rootJson['macro_names'] ??
@@ -915,12 +908,8 @@ class GameStatusService {
   List<bool> _macroNeedsTarget(
     Map<String, dynamic> rootJson,
     Map<String, dynamic> playerJson,
+    Map<String, dynamic>? macroJson,
   ) {
-    final macroJson =
-        _nestedMap(rootJson['macro']) ??
-        _nestedMap(rootJson['macros']) ??
-        _nestedMap(playerJson['macro']) ??
-        _nestedMap(playerJson['macros']);
     final targetJson =
         rootJson['macroNeedsTarget'] ??
         rootJson['macro_needs_target'] ??
@@ -1004,13 +993,7 @@ class GameStatusService {
   }
 
   dynamic _nestedValue(dynamic value, String key) {
-    if (value is Map<String, dynamic>) {
-      return value[key];
-    }
-    if (value is Map) {
-      return value[key];
-    }
-    return null;
+    return value is Map ? value[key] : null;
   }
 
   Map<String, dynamic>? _nestedMap(dynamic value) {
@@ -1059,13 +1042,14 @@ class GameStatusService {
     final mpPercent =
         _doubleValue(json['mpPercent']) ?? _doubleValue(json['mp_percent']);
 
+    final (:x, :y) = _mapXY(json);
     return PartyMember(
       name: json['name'] as String? ?? '',
       job: json['job'] as String? ?? '',
       subjob: json['subjob'] as String? ?? '',
       location: json['location'] as String? ?? 'Unknown',
-      locationX: _mapX(json),
-      locationY: _mapY(json),
+      locationX: x,
+      locationY: y,
       level: (json['level'] as num?)?.toInt() ?? 1,
       currentHp: currentHp,
       maxHp:
@@ -1094,12 +1078,13 @@ class GameStatusService {
     int? defaultType,
     String? defaultKind,
   }) {
+    final (:x, :y) = _mapXY(json);
     return MapEntityLocation(
       name: json['name'] as String? ?? '',
       type: _intValue(json['type']) ?? defaultType ?? 1,
       location: json['location'] as String? ?? 'Unknown',
-      locationX: _mapX(json),
-      locationY: _mapY(json),
+      locationX: x,
+      locationY: y,
       kind: json['kind'] as String? ?? defaultKind,
       hpPercent:
           _doubleValue(json['hpPercent']) ?? _doubleValue(json['hp_percent']),
@@ -1128,40 +1113,26 @@ class GameStatusService {
     return buffsJson.map(_buffFromJson).nonNulls.toList();
   }
 
-  double _mapX(Map<String, dynamic> json) {
+  ({double x, double y}) _mapXY(Map<String, dynamic> json) {
     final worldX = _doubleValue(json['worldX']);
-    if (worldX != null) {
+    final worldY = _doubleValue(json['worldY']);
+    final worldZ = _doubleValue(json['worldZ']);
+    if (worldX != null || worldY != null || worldZ != null) {
       final zoneName = json['location'] as String? ?? '';
-      final worldZ = _doubleValue(json['worldZ']) ?? 0.0;
-      return MapService.worldToMap(
+      final point = MapService.worldToMap(
         zoneName: zoneName,
         zoneId: _intValue(json['zoneId']),
         subMapNum: _intValue(json['subMapNum']),
-        worldX: worldX,
-        worldY: _doubleValue(json['worldY']),
-        worldZ: worldZ,
-      ).x;
+        worldX: worldX ?? 0.0,
+        worldY: worldY,
+        worldZ: worldZ ?? 0.0,
+      );
+      return (x: point.x, y: point.y);
     }
 
-    return (json['locationX'] as num?)?.toDouble().clamp(0.0, 1.0) ?? 0.5;
-  }
-
-  double _mapY(Map<String, dynamic> json) {
-    final worldMapY =
-        _doubleValue(json['worldY']) ?? _doubleValue(json['worldZ']);
-    if (worldMapY != null) {
-      final zoneName = json['location'] as String? ?? '';
-      final worldX = _doubleValue(json['worldX']) ?? 0.0;
-      return MapService.worldToMap(
-        zoneName: zoneName,
-        zoneId: _intValue(json['zoneId']),
-        subMapNum: _intValue(json['subMapNum']),
-        worldX: worldX,
-        worldY: _doubleValue(json['worldY']),
-        worldZ: _doubleValue(json['worldZ']),
-      ).y;
-    }
-
-    return (json['locationY'] as num?)?.toDouble().clamp(0.0, 1.0) ?? 0.5;
+    return (
+      x: (json['locationX'] as num?)?.toDouble().clamp(0.0, 1.0) ?? 0.5,
+      y: (json['locationY'] as num?)?.toDouble().clamp(0.0, 1.0) ?? 0.5,
+    );
   }
 }

@@ -39,17 +39,48 @@ class _MacroScreenState extends State<MacroScreen> {
   int _castPulseId = 0;
   bool _gameCastActive = false;
   double? _lastGameCastProgress;
+  Stream<PlayerStatus>? _statusStream;
+  StreamSubscription<PlayerStatus>? _statusSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToStatus(widget.statusStream);
+  }
+
+  @override
+  void didUpdateWidget(MacroScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.statusStream != widget.statusStream) {
+      _statusSubscription?.cancel();
+      _subscribeToStatus(widget.statusStream);
+    }
+  }
+
+  void _subscribeToStatus(Stream<PlayerStatus>? stream) {
+    final statusStream = stream == null || stream.isBroadcast
+        ? stream
+        : stream.asBroadcastStream();
+    _statusStream = statusStream;
+    _statusSubscription = statusStream?.listen((status) {
+      _updateGameCastTracking(
+        isCasting: status.castState?.isCasting ?? false,
+        progress: _gameCastProgress(status),
+      );
+    });
+  }
 
   @override
   void dispose() {
     _castTimer?.cancel();
+    _statusSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<PlayerStatus>(
-      stream: widget.statusStream,
+      stream: _statusStream,
       builder: (context, snapshot) {
         final status = snapshot.data;
         final macroNames = status?.macroNames ?? const [];
@@ -67,10 +98,6 @@ class _MacroScreenState extends State<MacroScreen> {
             widget.settings?.buttonTextColor ??
             AppSettingsController.defaultButtonTextColor;
         final gameCastProgress = _gameCastProgress(status);
-        _updateGameCastTracking(
-          isCasting: status?.castState?.isCasting ?? false,
-          progress: gameCastProgress,
-        );
         final colorScheme = Theme.of(context).colorScheme;
 
         return Scaffold(
@@ -214,11 +241,6 @@ class _MacroScreenState extends State<MacroScreen> {
                                   buttonColor: buttonColor,
                                   buttonTextColor: buttonTextColor,
                                   onTap: () => _activateMacroSlot(
-                                    slot: slot,
-                                    status: status,
-                                    needsTarget: needsTarget,
-                                  ),
-                                  onLongPress: () => _activateMacroSlot(
                                     slot: slot,
                                     status: status,
                                     needsTarget: needsTarget,
@@ -941,7 +963,6 @@ class _MacroInputTile extends StatelessWidget {
     required this.buttonColor,
     required this.buttonTextColor,
     required this.onTap,
-    required this.onLongPress,
   });
 
   final _MacroModifier modifier;
@@ -957,7 +978,6 @@ class _MacroInputTile extends StatelessWidget {
   final Color buttonColor;
   final Color buttonTextColor;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -969,7 +989,6 @@ class _MacroInputTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(8),
         child: Ink(
           decoration: BoxDecoration(
@@ -1149,10 +1168,39 @@ class _CastFeedbackVisual extends StatelessWidget {
 }
 
 class _CastEdgeGlowPainter extends CustomPainter {
-  const _CastEdgeGlowPainter({required this.progress, required this.color});
+  _CastEdgeGlowPainter({required this.progress, required this.color})
+    : _basePaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..color = color.withValues(alpha: 0.34),
+      _glowColors = [
+        color.withValues(alpha: 0),
+        color.withValues(alpha: 1),
+        color.withValues(alpha: 0),
+      ],
+      _highlightColors = [
+        color.withValues(alpha: 0),
+        Colors.white.withValues(alpha: 0.78),
+        color.withValues(alpha: 0),
+      ],
+      _glowPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+      _highlightPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5;
+
+  static const _radius = Radius.circular(8);
+  static const _gradientStops = [0.0, 0.5, 1.0];
 
   final double progress;
   final Color color;
+  final Paint _basePaint;
+  final Paint _glowPaint;
+  final Paint _highlightPaint;
+  final List<Color> _glowColors;
+  final List<Color> _highlightColors;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1160,14 +1208,11 @@ class _CastEdgeGlowPainter extends CustomPainter {
       return;
     }
 
-    final rect = Offset.zero & size;
-    final radius = Radius.circular(8);
-    final rrect = RRect.fromRectAndRadius(rect.deflate(2), radius);
-    final basePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5
-      ..color = color.withValues(alpha: 0.34);
-    canvas.drawRRect(rrect, basePaint);
+    final rrect = RRect.fromRectAndRadius(
+      (Offset.zero & size).deflate(2),
+      _radius,
+    );
+    canvas.drawRRect(rrect, _basePaint);
 
     final glowWidth = size.width * 0.48;
     final centerX = -glowWidth + (size.width + glowWidth * 2) * progress;
@@ -1177,33 +1222,18 @@ class _CastEdgeGlowPainter extends CustomPainter {
       glowWidth * 2,
       size.height,
     );
-    final glowPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 5
-      ..shader = LinearGradient(
-        colors: [
-          color.withValues(alpha: 0),
-          color.withValues(alpha: 1),
-          color.withValues(alpha: 0),
-        ],
-        stops: const [0, 0.5, 1],
-      ).createShader(shaderRect)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
 
-    canvas.drawRRect(rrect, glowPaint);
+    _glowPaint.shader = LinearGradient(
+      colors: _glowColors,
+      stops: _gradientStops,
+    ).createShader(shaderRect);
+    canvas.drawRRect(rrect, _glowPaint);
 
-    final highlightPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5
-      ..shader = LinearGradient(
-        colors: [
-          color.withValues(alpha: 0),
-          Colors.white.withValues(alpha: 0.78),
-          color.withValues(alpha: 0),
-        ],
-        stops: const [0, 0.5, 1],
-      ).createShader(shaderRect);
-    canvas.drawRRect(rrect, highlightPaint);
+    _highlightPaint.shader = LinearGradient(
+      colors: _highlightColors,
+      stops: _gradientStops,
+    ).createShader(shaderRect);
+    canvas.drawRRect(rrect, _highlightPaint);
   }
 
   @override

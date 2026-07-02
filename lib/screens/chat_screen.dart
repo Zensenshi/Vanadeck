@@ -32,6 +32,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Duration _cooldownRemaining = Duration.zero;
   Timer? _cooldownTimer;
 
+  List<ChatMessage>? _lastRemoteMessages;
+  List<ChatMessage> _sortedRemoteMessages = const [];
+
   bool get _isCoolingDown => _cooldownRemaining > Duration.zero;
 
   @override
@@ -71,17 +74,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                 )
                                 .toList() ??
                             const <ChatMessage>[];
-                        final messages =
-                            [
-                              ...remoteMessages,
-                              ..._localMessages.map(
-                                (message) => ChatMessage(
-                                  text: message.text,
-                                  mode: -1,
-                                  receivedAt: message.sentAt,
-                                ),
-                              ),
-                            ]..sort((a, b) {
+                        if (!identical(remoteMessages, _lastRemoteMessages)) {
+                          _lastRemoteMessages = remoteMessages;
+                          _sortedRemoteMessages = List.of(remoteMessages)
+                            ..sort((a, b) {
                               final compared = a.receivedAt.compareTo(
                                 b.receivedAt,
                               );
@@ -90,6 +86,17 @@ class _ChatScreenState extends State<ChatScreen> {
                               }
                               return (a.id ?? 0).compareTo(b.id ?? 0);
                             });
+                        }
+                        final messages = [
+                          ..._sortedRemoteMessages,
+                          ..._localMessages.map(
+                            (message) => ChatMessage(
+                              text: message.text,
+                              mode: -1,
+                              receivedAt: message.sentAt,
+                            ),
+                          ),
+                        ];
                         final shouldFollowNewMessages = _isNearBottom();
 
                         WidgetsBinding.instance.addPostFrameCallback((_) {
